@@ -1,0 +1,96 @@
+/* Core Ionic CSS */
+@import "@ionic/angular/css/core.css";
+@import "@ionic/angular/css/normalize.css";
+@import "@ionic/angular/css/structure.css";
+@import "@ionic/angular/css/typography.css";
+@import "@ionic/angular/css/display.css";
+@import "@ionic/angular/css/padding.css";
+@import "@ionic/angular/css/float-elements.css";
+@import "@ionic/angular/css/text-alignment.css";
+@import "@ionic/angular/css/text-transformation.css";
+@import "@ionic/angular/css/flex-utils.css";
+
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Poppins:wght@400;500;600;700&display=swap');
+
+* {
+  font-family: var(--app-font-body);
+}
+
+/* Brand "bubble" headline style, mimicking the SnackStation banner artwork */
+.brand-heading {
+  // font-family: var(--app-font-heading);
+  // font-weight: 800;
+  color: var(--ion-color-secondary);
+  -webkit-text-stroke: 1px #ffffff;
+  text-shadow: 0 3px 0 rgba(0,0,0,0.15);
+  letter-spacing: 0.5px;
+}
+
+.ss-toolbar {
+  --background: #E4141B !important;
+  --color: #fff !important;
+}
+
+.ss-hero {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--ion-color-primary),
+    var(--ion-color-primary) 22px,
+    var(--ion-color-primary-shade) 22px,
+    var(--ion-color-primary-shade) 24px
+  );
+  border-radius: var(--app-radius);
+  padding: 20px;
+  color: #fff;
+}
+
+.ss-card {
+  border-radius: var(--app-radius);
+  box-shadow: 0 4px 14px rgba(107, 16, 16, 0.08);
+}
+
+.ss-stat-card {
+  border-radius: var(--app-radius);
+  background: #fff;
+  padding: 14px;
+  text-align: center;
+}
+
+.ss-stat-value {
+  font-family: var(--app-font-heading);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ion-color-primary);
+}
+
+.ss-stat-label {
+  font-size: 12px;
+  color: var(--ion-color-medium);
+}
+
+.ss-badge-yellow {
+  --background: var(--ion-color-secondary);
+  --color: var(--ion-color-secondary-contrast);
+  font-weight: 600;
+}
+
+/* Responsive grid: phones = 2 cols, tablets/desktop = wider grid */
+.ss-grid-2 { --ion-grid-columns: 12; }
+
+@media (min-width: 768px) {
+  .ss-container {
+    max-width: 900px;
+    margin: 0 auto;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ss-container {
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  ion-split-pane {
+    --side-min-width: 260px;
+    --side-max-width: 300px;
+  }
+}

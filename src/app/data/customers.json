@@ -1,0 +1,42 @@
+[
+  {
+    "id": "C001",
+    "name": "Ravi Teja",
+    "phone": "9876543210",
+    "email": "ravi.teja@example.com",
+    "loyaltyPoints": 320,
+    "outstandingAmount": 0,
+    "group": "VIP",
+    "totalOrders": 24
+  },
+  {
+    "id": "C002",
+    "name": "Priya Sharma",
+    "phone": "9123456780",
+    "email": "priya.sharma@example.com",
+    "loyaltyPoints": 85,
+    "outstandingAmount": 150,
+    "group": "Regular",
+    "totalOrders": 6
+  },
+  {
+    "id": "C003",
+    "name": "Arjun Kumar",
+    "phone": "9988776655",
+    "email": "arjun.kumar@example.com",
+    "loyaltyPoints": 12,
+    "outstandingAmount": 0,
+    "group": "New",
+    "totalOrders": 1
+  },
+  {
+    "id": "C004",
+    "name": "Sneha Reddy",
+    "phone": "9012345678",
+    "email": "sneha.reddy@example.com",
+    "loyaltyPoints": 540,
+    "outstandingAmount": 0,
+    "group": "VIP",
+    "totalOrders": 41
+  }
+]

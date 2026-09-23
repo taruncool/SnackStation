@@ -1,0 +1,46 @@
+{
+  "name": "snack-station",
+  "version": "1.0.0",
+  "author": "SnackStation",
+  "homepage": "https://snackstation.app",
+  "scripts": {
+    "ng": "ng",
+    "start": "ng serve",
+    "build": "ng build",
+    "watch": "ng build --watch --configuration development",
+    "android": "npx cap sync android && npx cap open android",
+    "ios": "npx cap sync ios && npx cap open ios"
+  },
+  "private": true,
+  "dependencies": {
+    "@angular/animations": "^18.2.0",
+    "@angular/common": "^18.2.0",
+    "@angular/compiler": "^18.2.0",
+    "@angular/core": "^18.2.0",
+    "@angular/forms": "^18.2.0",
+    "@angular/platform-browser": "^18.2.0",
+    "@angular/platform-browser-dynamic": "^18.2.0",
+    "@angular/router": "^18.2.0",
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/app": "6.0.1",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/haptics": "6.0.1",
+    "@capacitor/ios": "^6.1.2",
+    "@capacitor/keyboard": "6.0.2",
+    "@capacitor/status-bar": "6.0.1",
+    "@ionic/angular": "^8.2.6",
+    "ionicons": "^7.4.0",
+    "rxjs": "~7.8.1",
+    "tslib": "^2.6.3",
+    "zone.js": "~0.14.8"
+  },
+  "devDependencies": {
+    "@angular-devkit/build-angular": "^18.2.0",
+    "@angular/cli": "^18.2.0",
+    "@angular/compiler-cli": "^18.2.0",
+    "@capacitor/cli": "^6.1.2",
+    "@ionic/angular-toolkit": "^11.0.1",
+    "typescript": "~5.5.0"
+  },
+  "description": "SnackStation - Smart Food Shop Management App"
+}

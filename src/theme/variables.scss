@@ -1,0 +1,54 @@
+// SnackStation brand theme
+// Primary Red (banner/background), Secondary Yellow (accent/headline text)
+
+:root {
+  /* Brand Red — !important guarantees this wins over Ionic's default blue
+     regardless of stylesheet load order in any build tool (ng build, ng serve,
+     Capacitor live-reload, etc.) */
+  --ion-color-primary: #E4141B !important;
+  --ion-color-primary-rgb: 228, 20, 27 !important;
+  --ion-color-primary-contrast: #ffffff !important;
+  --ion-color-primary-contrast-rgb: 255, 255, 255 !important;
+  --ion-color-primary-shade: #c9121a !important;
+  --ion-color-primary-tint: #e72c33 !important;
+
+  /* Brand Yellow */
+  --ion-color-secondary: #FFD200 !important;
+  --ion-color-secondary-rgb: 255, 210, 0 !important;
+  --ion-color-secondary-contrast: #6b1010 !important;
+  --ion-color-secondary-contrast-rgb: 107, 16, 16 !important;
+  --ion-color-secondary-shade: #e0b900 !important;
+  --ion-color-secondary-tint: #ffd71a !important;
+
+  /* Success / Warning / Danger */
+  --ion-color-success: #2dd36f;
+  --ion-color-warning: #ffc409;
+  --ion-color-danger: #eb445a;
+
+  /* Dark charcoal for text on light backgrounds */
+  --ion-color-dark: #2b1212;
+  --ion-color-medium: #8b6b6b;
+  --ion-color-light: #fff6e9;
+
+  --ion-background-color: #FFF8ED;
+  --ion-text-color: #2b1212;
+  --ion-toolbar-background: var(--ion-color-primary);
+  --ion-toolbar-color: #ffffff;
+  --ion-item-background: #ffffff;
+  --ion-tab-bar-background: #ffffff;
+  --ion-tab-bar-color: #a98a8a;
+  --ion-tab-bar-color-selected: var(--ion-color-primary);
+
+  --app-font-heading: 'Baloo 2', 'Poppins', sans-serif;
+  --app-font-body: 'Poppins', sans-serif;
+  --app-radius: 16px;
+}
+
+.ion-color-secondary {
+  --ion-color-base: var(--ion-color-secondary);
+  --ion-color-base-rgb: var(--ion-color-secondary-rgb);
+  --ion-color-contrast: var(--ion-color-secondary-contrast);
+  --ion-color-contrast-rgb: var(--ion-color-secondary-contrast-rgb);
+  --ion-color-shade: var(--ion-color-secondary-shade);
+  --ion-color-tint: var(--ion-color-secondary-tint);
+}

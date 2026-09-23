@@ -1,0 +1,28 @@
+{
+  "todayRevenue": 18420,
+  "billsCount": 87,
+  "itemsSold": 231,
+  "profit": 6120,
+  "todaysCustomers": 74,
+  "topSellingProducts": [
+    { "name": "Chicken Popcorn", "unitsSold": 58 },
+    { "name": "French Fries", "unitsSold": 49 },
+    { "name": "Crunchy Burger", "unitsSold": 34 },
+    { "name": "Juicy Wings", "unitsSold": 27 }
+  ],
+  "salesTrend": [
+    { "day": "Mon", "value": 12500 },
+    { "day": "Tue", "value": 14800 },
+    { "day": "Wed", "value": 11200 },
+    { "day": "Thu", "value": 16900 },
+    { "day": "Fri", "value": 20100 },
+    { "day": "Sat", "value": 24800 },
+    { "day": "Sun", "value": 18420 }
+  ],
+  "paymentDistribution": [
+    { "method": "UPI", "percent": 48 },
+    { "method": "Cash", "percent": 27 },
+    { "method": "Card", "percent": 20 },
+    { "method": "Wallet", "percent": 5 }
+  ]
+}

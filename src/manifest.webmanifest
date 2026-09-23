@@ -1,0 +1,12 @@
+{
+  "name": "SnackStation",
+  "short_name": "SnackStation",
+  "theme_color": "#E4141B",
+  "background_color": "#FFF8ED",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "/",
+  "icons": [
+    { "src": "assets/icon/favicon.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

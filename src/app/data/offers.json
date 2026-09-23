@@ -1,0 +1,34 @@
+[
+  {
+    "id": "OFF01",
+    "title": "Weekend Combo",
+    "type": "Combo Offer",
+    "description": "Chicken Popcorn + Fries + Coke at a flat price",
+    "value": "₹149",
+    "active": true
+  },
+  {
+    "id": "OFF02",
+    "title": "Happy Hour 4-6 PM",
+    "type": "Percentage Discount",
+    "description": "20% off on all snacks",
+    "value": "20%",
+    "active": true
+  },
+  {
+    "id": "OFF03",
+    "title": "Buy 1 Get 1 - Wings",
+    "type": "BOGO",
+    "description": "Buy one plate of Juicy Wings, get one free",
+    "value": "BOGO",
+    "active": false
+  },
+  {
+    "id": "OFF04",
+    "title": "Birthday Treat",
+    "type": "Loyalty Offer",
+    "description": "Free Crunchy Burger on your birthday",
+    "value": "Free item",
+    "active": true
+  }
+]
