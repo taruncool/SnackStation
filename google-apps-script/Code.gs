@@ -6,7 +6,7 @@
  *
  * Endpoints (after deploying as a Web App):
  *   GET  {url}?sheet=Products              -> all rows in the "Products" tab as JSON
- *   POST {url}  { sheet, action, data }    -> action: "add" | "addMany" | "update" | "delete"
+ *   POST {url}  { sheet, action, data }    -> action: "add" | "addMany" | "update" | "updateMany" | "delete"
  *
  * Every sheet/tab must have a header row. Rows are matched for update/delete
  * by a column named "id".
@@ -75,6 +75,21 @@ function doPost(e) {
     return jsonResponse({ success: true });
   }
 
+  if (action === 'updateMany') {
+    var idColUpdateMany = headers.indexOf('id') + 1;
+    var itemsUpdateMany = data || [];
+    var updatedCount = 0;
+    for (var u = 0; u < itemsUpdateMany.length; u++) {
+      var rowIndexMany = findRowById(sheet, idColUpdateMany, itemsUpdateMany[u].id);
+      if (rowIndexMany === -1) continue;
+      sheet
+        .getRange(rowIndexMany, 1, 1, headers.length)
+        .setValues([rowFromObject(headers, itemsUpdateMany[u])]);
+      updatedCount++;
+    }
+    return jsonResponse({ success: true, count: updatedCount });
+  }
+
   if (action === 'delete') {
     var idColDelete = headers.indexOf('id') + 1;
     var rowIndexDelete = findRowById(sheet, idColDelete, data.id);
@@ -128,36 +143,52 @@ function jsonResponse(obj) {
  * ------------------------------------------------------------------------
  * ONE-CLICK SEED: run this once (Run > seedSnackStationData, in the Apps
  * Script editor toolbar) to create every tab with the right headers and
- * pre-fill Products/Categories/Customers/Offers with the same demo data
- * the app shipped with, so you're not typing it all in by hand.
+ * pre-fill Products/Categories/Customers/Offers/Expenses with the same
+ * demo data the app shipped with, so you're not typing it all in by hand.
+ * SalesHistory is created with the right headers but starts empty — the
+ * app appends rows there itself.
  * ------------------------------------------------------------------------
  */
 function seedSnackStationData() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
 
   setSheetData(ss, 'Products',
-    ['id', 'name', 'category', 'sku', 'purchasePrice', 'sellingPrice', 'gst', 'unit', 'stockQty', 'minStock', 'expiryDate', 'status', 'image'],
+    ['id', 'name', 'category', 'sku', 'costPrice', 'sellingPrice', 'gst', 'unit', 'stockQty', 'minStock', 'expiryDate', 'status', 'image'],
     [
-      ['P001', 'Chicken Popcorn', 'Snacks', 'SS-CP-001', 60, 99, 5, 'box', 42, 10, '2026-09-15', 'active', 'chicken-popcorn'],
-      ['P002', 'Chicken Nuggets', 'Snacks', 'SS-CN-002', 70, 119, 5, 'box', 8, 10, '2026-08-30', 'active', 'chicken-nuggets'],
-      ['P003', 'French Fries', 'Snacks', 'SS-FF-003', 35, 69, 5, 'box', 65, 15, '2026-10-01', 'active', 'french-fries'],
-      ['P004', 'Juicy Wings', 'Snacks', 'SS-JW-004', 90, 149, 5, 'plate', 27, 10, '2026-08-20', 'active', 'juicy-wings'],
-      ['P005', 'Crispy Chicken Tenders', 'Snacks', 'SS-CT-005', 80, 139, 5, 'box', 5, 10, '2026-08-18', 'active', 'chicken-tenders'],
-      ['P006', 'Crunchy Burger', 'Bakery', 'SS-CB-006', 75, 129, 5, 'piece', 33, 10, '2026-08-05', 'active', 'crunchy-burger'],
-      ['P007', 'Coca-Cola 500ml', 'Beverages', 'SS-CC-007', 20, 40, 12, 'bottle', 120, 30, '2027-01-01', 'active', 'cola'],
-      ['P008', 'Iced Tea', 'Beverages', 'SS-IT-008', 18, 35, 12, 'bottle', 3, 20, '2026-12-01', 'active', 'iced-tea'],
-      ['P009', 'Choco Frozen Bar', 'Frozen Foods', 'SS-FB-009', 25, 50, 18, 'piece', 18, 10, '2026-11-10', 'active', 'frozen-bar'],
+      ['P001', 'Chicken Pop Corn', 'Snacks', 'SS-SN-001', 60, 99, 5, 'box', 42, 10, '2026-11-30', 'active', 'Chicken-Pop-corn'],
+      ['P002', 'Chicken Classic', 'Fast Food', 'SS-FF-001', 78, 129, 5, 'box', 18, 10, '2026-10-31', 'active', 'Chicken-CLassic'],
+      ['P003', 'Chicken Wings', 'Snacks', 'SS-SN-002', 90, 149, 5, 'plate', 27, 10, '2026-11-30', 'active', 'Chicken-Wings'],
+      ['P004', 'Chicken Wrap', 'Fast Food', 'SS-FF-002', 72, 119, 5, 'wrap', 16, 10, '2026-10-31', 'active', 'Chicken-Wrap'],
+      ['P005', 'Chicken Strips', 'Snacks', 'SS-SN-003', 84, 139, 5, 'box', 24, 10, '2026-11-30', 'active', 'Chicken-strips'],
+      ['P006', 'Classic Chicken Burger', 'Fast Food', 'SS-FF-003', 102, 169, 5, 'piece', 31, 10, '2026-10-31', 'active', 'Classic-Chicken-Burger'],
+      ['P007', 'Classic Hot Dog', 'Fast Food', 'SS-FF-004', 78, 129, 5, 'piece', 22, 10, '2026-10-31', 'active', 'Classic-Hot-Dog'],
+      ['P008', 'Crunchy Chicken Burger', 'Fast Food', 'SS-FF-005', 96, 159, 5, 'piece', 15, 10, '2026-10-31', 'active', 'Crunchy-Chicken-Burger'],
+      ['P009', 'Eggnator', 'Fast Food', 'SS-FF-006', 90, 149, 5, 'piece', 20, 10, '2026-10-31', 'active', 'EGGNATOR'],
+      ['P010', 'French Fries', 'Snacks', 'SS-SN-004', 35, 69, 5, 'box', 65, 10, '2026-11-30', 'active', 'French-Fries'],
+      ['P011', 'Kinley', 'Beverages', 'SS-BV-001', 12, 20, 12, 'bottle', 90, 10, '2027-03-01', 'active', 'Kinley'],
+      ['P012', 'Mix Veg Wrap', 'Fast Food', 'SS-FF-007', 60, 99, 5, 'wrap', 19, 10, '2026-10-31', 'active', 'MIX-VEG-WRAP'],
+      ['P013', 'Mix Veg Supreme Wrap', 'Fast Food', 'SS-FF-008', 72, 119, 5, 'wrap', 14, 10, '2026-10-31', 'active', 'Mix-Veg-Supreme-Wrap'],
+      ['P014', 'Nugget Wrap', 'Fast Food', 'SS-FF-009', 66, 109, 5, 'wrap', 17, 10, '2026-10-31', 'active', 'Nugget-Wrap'],
+      ['P015', 'Nuggets', 'Snacks', 'SS-SN-005', 70, 119, 5, 'box', 8, 10, '2026-11-30', 'active', 'Nuggets'],
+      ['P016', 'Peri Peri Fries', 'Snacks', 'SS-SN-006', 50, 89, 5, 'box', 30, 10, '2026-11-30', 'active', 'Peri-Peri-fries'],
+      ['P017', 'Sausage Wrap', 'Fast Food', 'SS-FF-010', 66, 109, 5, 'wrap', 12, 10, '2026-10-31', 'active', 'Sausage-Wrap'],
+      ['P018', 'Sheek Kebab Hot Dog', 'Fast Food', 'SS-FF-011', 84, 139, 5, 'piece', 16, 10, '2026-10-31', 'active', 'Sheek-Kebab-Hot-Dog'],
+      ['P019', 'Sheek Kebab Wrap', 'Fast Food', 'SS-FF-012', 78, 129, 5, 'wrap', 13, 10, '2026-10-31', 'active', 'Sheek-kebab-Wrap'],
+      ['P020', 'Stuffed Hot Dog', 'Fast Food', 'SS-FF-013', 90, 149, 5, 'piece', 21, 10, '2026-10-31', 'active', 'Stuffed-Hot-Dog'],
+      ['P021', 'Supreme Veg Burger', 'Fast Food', 'SS-FF-014', 84, 139, 5, 'piece', 25, 10, '2026-10-31', 'active', 'Supreme-Veg-Burger'],
+      ['P022', 'Thums Up', 'Beverages', 'SS-BV-002', 22, 40, 12, 'bottle', 75, 10, '2027-03-01', 'active', 'Thums-Up'],
+      ['P023', 'Veg Burger', 'Fast Food', 'SS-FF-015', 66, 109, 5, 'piece', 28, 10, '2026-10-31', 'active', 'Veg-Burger'],
+      ['P024', 'Veg Classic Burger', 'Fast Food', 'SS-FF-016', 78, 129, 5, 'piece', 20, 10, '2026-10-31', 'active', 'Veg-Classic-Burger'],
     ]
   );
 
   setSheetData(ss, 'Categories',
     ['id', 'name', 'icon', 'productCount'],
     [
-      ['cat-01', 'Snacks', 'fast-food-outline', 5],
-      ['cat-02', 'Beverages', 'cafe-outline', 2],
-      ['cat-03', 'Bakery', 'pizza-outline', 1],
-      ['cat-04', 'Frozen Foods', 'snow-outline', 1],
-      ['cat-05', 'Dairy', 'water-outline', 0],
+      ['cat-01', 'Snacks', 'fast-food-outline', 6],
+      ['cat-02', 'Fast Food', 'pizza-outline', 16],
+      ['cat-03', 'Beverages', 'cafe-outline', 2],
+      ['cat-04', 'Ice Cream', 'snow-outline', 0],
     ]
   );
 
@@ -182,10 +213,30 @@ function seedSnackStationData() {
   );
 
   // Sales history starts empty — the app appends rows here every time
-  // "Submit Today's Sales" is tapped in the Sales Count page.
+  // "Submit Today's Sales" is tapped in the Sales Count page. costAtSale is
+  // captured per row so Reports can compute each day's margin.
   setSheetData(ss, 'SalesHistory',
-    ['id', 'date', 'productId', 'productName', 'qty', 'priceAtSale', 'submittedAt'],
+    ['id', 'date', 'productId', 'productName', 'qty', 'priceAtSale', 'costAtSale', 'submittedAt'],
     []
+  );
+
+  // Expenses / Inventory — Raw Material, Kitchen Appliances (equipment,
+  // depreciated via usefulLifeMonths), Store Expenses, Salaries, Transport
+  // Charges, Utility, Miscellaneous. Seeded with a few starter entries.
+  setSheetData(ss, 'Expenses',
+    ['id', 'date', 'category', 'name', 'amount', 'notes', 'usefulLifeMonths'],
+    [
+      ['E001', '2026-09-01', 'Kitchen Appliances', 'Commercial Gas Stove (4-burner)', 18000, 'One-time kitchen setup', 36],
+      ['E002', '2026-09-01', 'Kitchen Appliances', 'LPG Gas Connection', 3500, 'Deposit + first cylinder', 36],
+      ['E003', '2026-09-02', 'Kitchen Appliances', 'Cooking Utensils & Tools Set', 6500, 'Pans, ladles, tongs, fryer basket', 36],
+      ['E004', '2026-09-10', 'Raw Material', 'Chicken (bulk, 20kg)', 4200, '', ''],
+      ['E005', '2026-09-10', 'Raw Material', 'Burger buns & wraps (200 pcs)', 1800, '', ''],
+      ['E006', '2026-09-12', 'Utility', 'LPG Cylinder Refill', 1100, '', ''],
+      ['E007', '2026-09-01', 'Store Expenses', 'Shop Rent', 12000, 'September rent', ''],
+      ['E008', '2026-09-05', 'Salaries', 'Kitchen Staff Wages', 15000, '2 staff, weekly payout', ''],
+      ['E009', '2026-09-08', 'Transport Charges', 'Ingredient Delivery / Pickup', 800, '', ''],
+      ['E010', '2026-09-15', 'Miscellaneous', 'Packaging Boxes & Bags', 1400, '', ''],
+    ]
   );
 
   Logger.log('SnackStation sheet tabs created and seeded successfully.');
@@ -199,7 +250,6 @@ function seedSnackStationData() {
     // no-op — see comment above
   }
 }
-
 function setSheetData(ss, name, headers, rows) {
   var sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);

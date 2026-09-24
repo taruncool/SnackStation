@@ -25,7 +25,7 @@ free Google Apps Script turns it into a JSON API the app talks to.
 5. First time only: a permissions popup appears. Click **Continue** (or **Review permissions**) → pick your Google account → you'll see "Google hasn't verified this app" → click **Advanced** (small link, bottom left) → **Go to project (unsafe)** → **Allow**. This warning is normal — it just means this is your own script, not a published one.
 6. Click **SnackStation > Seed Demo Data** again (the permissions step sometimes cancels the first click — just retry).
 7. You should see a popup: "SnackStation sheet tabs created and seeded ✅".
-8. Look at the tabs along the bottom of the Sheet — you should now see 5: **Products, Categories, Customers, Offers, SalesHistory**, with the first four pre-filled with demo data.
+8. Look at the tabs along the bottom of the Sheet — you should now see 6: **Products, Categories, Customers, Offers, SalesHistory, Expenses**, with all but SalesHistory (which starts empty) pre-filled with demo data.
 
 ## 4. Deploy as a Web App
 
@@ -47,8 +47,9 @@ export const environment = {
 };
 ```
 
-Save, then `npm start` — Products, Categories, Customers, and Offers now load
-live from your Google Sheet, and every add/edit writes back to it.
+Save, then `npm start` — Products, Categories, Customers, Offers, Sales History,
+and Expenses now all load live from your Google Sheet, and every add/edit
+writes back to it.
 
 ## What's wired up vs. what isn't (yet)
 
@@ -58,8 +59,10 @@ live from your Google Sheet, and every add/edit writes back to it.
 | Categories | ✅ Google Sheet, read |
 | Customers (list, add) | ✅ Google Sheet, live |
 | Offers | ✅ Google Sheet, read |
-| Sales Count → "Submit Today's Sales" | ✅ Writes rows to the SalesHistory sheet tab |
-| Sales History (the clock-icon modal) | ✅ Reads and aggregates from SalesHistory tab, so it's shared across every device/person using the same Sheet |
+| Sales Count → "Submit Today's Sales" | ✅ Writes rows to the SalesHistory sheet tab, and deducts stock in the Products tab |
+| Sales History (feeds Reports' Income & Revenue) | ✅ Reads and aggregates from SalesHistory tab, so it's shared across every device/person using the same Sheet |
+| Inventory & Expenses (Raw Material, Kitchen Appliances, Store Expenses, Salaries, Transport Charges, Utility, Miscellaneous) | ✅ Google Sheet, live — Kitchen Appliances are depreciated (spread across `usefulLifeMonths`) rather than expensed in full |
+| Reports → Income & Revenue (monthly/yearly Net Income) | ✅ Computed client-side from SalesHistory + Expenses, both live from the Sheet |
 | Dashboard KPIs (revenue, bills, profit, sales trend) | ⚠️ Still static demo numbers — computing these live from real sales would need either sheet formulas or a small aggregation step. Ask if you'd like this wired up next. |
 | Billing "Generate Invoice" | ⚠️ Still a local demo toast — doesn't write an invoice row to the sheet yet |
 
