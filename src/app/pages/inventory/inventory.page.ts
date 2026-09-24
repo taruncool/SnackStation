@@ -1,6 +1,7 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { IonicModule, ModalController, AlertController } from '@ionic/angular';
 import { DataService, Expense } from '../../services/data.service';
 
@@ -57,7 +58,7 @@ const CATEGORY_COLOR: Record<string, string> = {
       </ion-item>
       <ion-item>
         <ion-label position="stacked">Category</ion-label>
-        <ion-select [(ngModel)]="expense.category">
+        <ion-select [(ngModel)]="expense.category" (ionChange)="onCategoryChange()">
           <ion-select-option *ngFor="let c of categories" [value]="c">{{ c }}</ion-select-option>
         </ion-select>
       </ion-item>
@@ -68,6 +69,15 @@ const CATEGORY_COLOR: Record<string, string> = {
       <ion-item lines="none">
         <ion-label position="stacked">Date</ion-label>
         <ion-input type="date" [(ngModel)]="expense.date"></ion-input>
+      </ion-item>
+      <ion-item lines="none" *ngIf="expense.category === 'Kitchen Appliances'">
+        <ion-label position="stacked">Spread cost over (months)</ion-label>
+        <ion-input type="number" [(ngModel)]="expense.usefulLifeMonths"></ion-input>
+        <ion-note style="font-size:11px; display:block; margin-top:4px;">
+          Equipment is a one-time investment, not a monthly cost — its price is divided across
+          this many months instead of hitting one month's profit in full. 36 (3 years) is a
+          reasonable default; use 1 to expense it entirely in the purchase month.
+        </ion-note>
       </ion-item>
       <ion-item lines="none">
         <ion-label position="stacked">Notes (optional)</ion-label>
@@ -95,13 +105,25 @@ export class ExpenseFormModal {
     this.modalCtrl.dismiss();
   }
 
+  onCategoryChange() {
+    if (this.expense.category === 'Kitchen Appliances' && !this.expense.usefulLifeMonths) {
+      this.expense.usefulLifeMonths = 36;
+    }
+  }
+
   save() {
     if (!this.expense.name || !this.expense.amount || !this.expense.date) return;
-    if (this.expense.id) {
-      this.data.updateExpense(this.expense as Expense);
+    const payload: Partial<Expense> = { ...this.expense };
+    if (payload.category === 'Kitchen Appliances') {
+      payload.usefulLifeMonths = payload.usefulLifeMonths && payload.usefulLifeMonths > 0 ? payload.usefulLifeMonths : 36;
+    } else {
+      payload.usefulLifeMonths = 1;
+    }
+    if (payload.id) {
+      this.data.updateExpense(payload as Expense);
     } else {
       const id = 'E' + Date.now();
-      this.data.addExpense({ ...(this.expense as Expense), id });
+      this.data.addExpense({ ...(payload as Expense), id });
     }
     this.modalCtrl.dismiss();
   }
@@ -110,7 +132,7 @@ export class ExpenseFormModal {
 @Component({
   selector: 'app-inventory',
   standalone: true,
-  imports: [CommonModule, FormsModule, IonicModule],
+  imports: [CommonModule, FormsModule, IonicModule, RouterLink],
   template: `
     <ion-header>
       <ion-toolbar class="ss-toolbar">
@@ -143,7 +165,7 @@ export class ExpenseFormModal {
     <ion-content>
       <div class="ss-container" style="padding:14px;">
         <!-- Totals -->
-        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:6px;">
           <div class="ss-inv-stat">
             <div class="ss-inv-stat-value">₹{{ totalAll | number }}</div>
             <div class="ss-inv-stat-label">Total Invested (all time)</div>
@@ -153,6 +175,11 @@ export class ExpenseFormModal {
             <div class="ss-inv-stat-label">This Month</div>
           </div>
         </div>
+        <p style="font-size:11px; color:var(--ion-color-medium); margin:0 0 14px;">
+          Totals here are the full purchase price of everything logged. Kitchen Appliances are
+          spread across their useful life for Net Income on the
+          <a routerLink="/reports" style="color:var(--ion-color-primary); font-weight:600;">Reports</a> page instead of hitting one month in full.
+        </p>
 
         <!-- Breakdown by category -->
         <ion-card class="ss-card">
@@ -197,6 +224,9 @@ export class ExpenseFormModal {
                     e.category
                   }}</ion-badge>
                   {{ e.date }}<span *ngIf="e.notes"> · {{ e.notes }}</span>
+                </p>
+                <p *ngIf="e.usefulLifeMonths && e.usefulLifeMonths > 1" style="color:var(--ion-color-tertiary); font-weight:600;">
+                  Spread ₹{{ e.amount / e.usefulLifeMonths | number:'1.0-0' }}/mo over {{ e.usefulLifeMonths }} months
                 </p>
               </ion-label>
               <div slot="end" style="text-align:right;">

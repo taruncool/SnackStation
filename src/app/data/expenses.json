@@ -1,7 +1,7 @@
 [
-  { "id": "E001", "date": "2026-09-01", "category": "Kitchen Appliances", "name": "Commercial Gas Stove (4-burner)", "amount": 18000, "notes": "One-time kitchen setup" },
-  { "id": "E002", "date": "2026-09-01", "category": "Kitchen Appliances", "name": "LPG Gas Connection", "amount": 3500, "notes": "Deposit + first cylinder" },
-  { "id": "E003", "date": "2026-09-02", "category": "Kitchen Appliances", "name": "Cooking Utensils & Tools Set", "amount": 6500, "notes": "Pans, ladles, tongs, fryer basket" },
+  { "id": "E001", "date": "2026-09-01", "category": "Kitchen Appliances", "name": "Commercial Gas Stove (4-burner)", "amount": 18000, "notes": "One-time kitchen setup", "usefulLifeMonths": 36 },
+  { "id": "E002", "date": "2026-09-01", "category": "Kitchen Appliances", "name": "LPG Gas Connection", "amount": 3500, "notes": "Deposit + first cylinder", "usefulLifeMonths": 36 },
+  { "id": "E003", "date": "2026-09-02", "category": "Kitchen Appliances", "name": "Cooking Utensils & Tools Set", "amount": 6500, "notes": "Pans, ladles, tongs, fryer basket", "usefulLifeMonths": 36 },
   { "id": "E004", "date": "2026-09-10", "category": "Raw Material", "name": "Chicken (bulk, 20kg)", "amount": 4200, "notes": "" },
   { "id": "E005", "date": "2026-09-10", "category": "Raw Material", "name": "Burger buns & wraps (200 pcs)", "amount": 1800, "notes": "" },
   { "id": "E006", "date": "2026-09-12", "category": "Utility", "name": "LPG Cylinder Refill", "amount": 1100, "notes": "" },

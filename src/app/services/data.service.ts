@@ -55,7 +55,7 @@ export interface Offer {
  *  or anything else that should reduce net income for its month. */
 export interface Expense {
   id: string;
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD — purchase date / month depreciation starts from
   category:
     | 'Raw Material'
     | 'Kitchen Appliances'
@@ -67,6 +67,12 @@ export interface Expense {
   name: string;
   amount: number;
   notes: string;
+  /** Months to spread this cost over (depreciation), starting from `date`'s
+   *  month. Omitted/1 = hits Net Income in full in the purchase month, which
+   *  is right for Raw Material/Salaries/etc. Kitchen Appliances (equipment)
+   *  default to 36 (3 years) so one big purchase doesn't wipe out a single
+   *  month's profit. */
+  usefulLifeMonths?: number;
 }
 
 export interface CartItem {
@@ -403,6 +409,22 @@ export class DataService {
   // "estimatedMargin" below reflects that pricing estimate for reference
   // only and is intentionally NOT part of netIncome, to avoid subtracting
   // ingredient cost twice (once per item sold, once as the real purchase).
+  //
+  // Equipment (Kitchen Appliances) is capex, not a running cost: a single
+  // ₹18,000 stove shouldn't wipe out one month's profit, so its cost is
+  // depreciated — spread evenly across `usefulLifeMonths` starting from its
+  // purchase month — rather than hitting Net Income in full immediately.
+  /** This expense's contribution to a given (year, monthIndex 0-11)'s
+   *  expense total, after spreading it over its useful life. */
+  private expenseContribution(e: Expense, year: number, monthIndex: number): number {
+    const life = e.usefulLifeMonths && e.usefulLifeMonths > 1 ? e.usefulLifeMonths : 1;
+    const startYear = Number(e.date.slice(0, 4));
+    const startMonth = Number(e.date.slice(5, 7)) - 1;
+    const startAbs = startYear * 12 + startMonth;
+    const targetAbs = year * 12 + monthIndex;
+    if (targetAbs < startAbs || targetAbs >= startAbs + life) return 0;
+    return e.amount / life;
+  }
   /** Per-month breakdown for a given year. */
   getMonthlySummary(year: number) {
     const history = this.salesHistory$.value;
@@ -410,10 +432,9 @@ export class DataService {
     return Array.from({ length: 12 }, (_, i) => {
       const prefix = `${year}-${String(i + 1).padStart(2, '0')}`;
       const dayRecords = history.filter((h) => h.date.startsWith(prefix));
-      const monthExpenses = expenses.filter((e) => e.date.startsWith(prefix));
       const revenue = dayRecords.reduce((s, h) => s + h.totalRevenue, 0);
       const estimatedMargin = dayRecords.reduce((s, h) => s + h.totalProfit, 0);
-      const expenseTotal = monthExpenses.reduce((s, e) => s + e.amount, 0);
+      const expenseTotal = expenses.reduce((s, e) => s + this.expenseContribution(e, year, i), 0);
       return {
         month: i + 1,
         label: new Date(year, i, 1).toLocaleString('default', { month: 'short' }),
