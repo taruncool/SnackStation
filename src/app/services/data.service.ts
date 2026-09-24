@@ -5,6 +5,7 @@ import { environment } from '../../environments/environment';
 import dashboardData from '../data/dashboard.json';
 import productsData from '../data/products.json';
 import categoriesData from '../data/categories.json';
+import expensesData from '../data/expenses.json';
 
 export interface Product {
   id: string;
@@ -49,6 +50,18 @@ export interface Offer {
   active: boolean;
 }
 
+/** A one-off or recurring spend: raw material/ingredients, kitchen equipment
+ *  or other investment (stove, gas connection, cooking tools), utilities,
+ *  or anything else that should reduce net income for its month. */
+export interface Expense {
+  id: string;
+  date: string; // YYYY-MM-DD
+  category: 'Raw Material' | 'Investment/Equipment' | 'Utility' | 'Other';
+  name: string;
+  amount: number;
+  notes: string;
+}
+
 export interface CartItem {
   product: Product;
   qty: number;
@@ -67,6 +80,10 @@ const STORAGE_WORKING = 'snackstation_sales_working';
 // Products are local-only for now (see products.json) — no backend table yet,
 // so edits are kept in localStorage until a real database/API replaces this.
 const STORAGE_PRODUCTS = 'snackstation_products';
+// Sales History and Expenses are local-only too, for the same reason —
+// see the DataService class comment below.
+const STORAGE_SALES_HISTORY = 'snackstation_sales_history';
+const STORAGE_EXPENSES = 'snackstation_expenses';
 
 function loadJSON<T>(key: string, fallback: T): T {
   try {
@@ -95,15 +112,17 @@ function coerce<T extends Record<string, any>>(row: any, numberKeys: string[], b
 }
 
 /**
- * Talks to a Google Sheet through a Google Apps Script Web App (see
+ * Products, Categories, Sales History and Expenses are local-only for now
+ * (seeded from JSON in src/app/data/, edits persisted to localStorage) —
+ * see each section's comment below. Customers and Offers still talk to a
+ * Google Sheet through a Google Apps Script Web App (see
  * google-apps-script/Code.gs + SETUP.md). Every page in the app only ever
- * calls the public methods below (getProducts(), addProduct(), etc.) — this
- * is the ONE file to touch if you ever swap Google Sheets for Firebase,
- * Supabase, PocketBase, or a real Node.js API later.
+ * calls the public methods below (getProducts(), addExpense(), etc.) — this
+ * is the ONE file to touch as pieces move to a real database/API.
  *
- * The Sales Count *working tally* stays in localStorage for instant taps
- * with no network round trip; only "Submit Today's Sales" writes to the
- * Sheet, into the SalesHistory tab.
+ * The Sales Count *working tally* also stays in localStorage for instant
+ * taps with no network round trip; "Submit Today's Sales" writes it into
+ * local Sales History.
  */
 @Injectable({ providedIn: 'root' })
 export class DataService {
@@ -111,6 +130,7 @@ export class DataService {
   private categories$ = new BehaviorSubject<Category[]>([]);
   private customers$ = new BehaviorSubject<Customer[]>([]);
   private offers$ = new BehaviorSubject<Offer[]>([]);
+  private expenses$ = new BehaviorSubject<Expense[]>([]);
   private cart$ = new BehaviorSubject<CartItem[]>([]);
   private salesCount$ = new BehaviorSubject<Record<string, number>>(
     loadJSON<Record<string, number>>(STORAGE_WORKING, {})
@@ -130,6 +150,7 @@ export class DataService {
     this.categories$.next(categoriesData as Category[]);
     this.refreshCustomers();
     this.refreshOffers();
+    this.refreshExpenses();
     this.refreshSalesHistory();
   }
 
@@ -216,6 +237,33 @@ export class DataService {
     return this.offers$.asObservable();
   }
 
+  // ---- Expenses / Inventory spend (raw material, equipment, utilities) ----
+  // Local-only, same pattern as Products — seeded from expenses.json, edits
+  // persisted to localStorage until a real database/API replaces this.
+  refreshExpenses() {
+    const stored = loadJSON<Expense[] | null>(STORAGE_EXPENSES, null);
+    this.expenses$.next(stored ?? (expensesData as Expense[]));
+  }
+  getExpenses() {
+    return this.expenses$.asObservable();
+  }
+  getExpensesSnapshot() {
+    return this.expenses$.value;
+  }
+  private saveExpenses(list: Expense[]) {
+    this.expenses$.next(list);
+    saveJSON(STORAGE_EXPENSES, list);
+  }
+  addExpense(expense: Expense) {
+    this.saveExpenses([...this.expenses$.value, expense]);
+  }
+  updateExpense(updated: Expense) {
+    this.saveExpenses(this.expenses$.value.map((e) => (e.id === updated.id ? updated : e)));
+  }
+  deleteExpense(id: string) {
+    this.saveExpenses(this.expenses$.value.filter((e) => e.id !== id));
+  }
+
   // ---- Today's Sales Count (tap-to-count tally, separate from Billing cart) ----
   // Working counts persist to localStorage (per device, instant) so a page
   // refresh never loses today's in-progress tally.
@@ -247,11 +295,10 @@ export class DataService {
   }
 
   /**
-   * Registers the current tally as today's sales: writes one row per
-   * counted product to the SalesHistory sheet tab (shared across every
-   * device/person using the same Google Sheet), then clears the local
-   * working buffer. Returns null if there's nothing to submit, or if the
-   * write fails.
+   * Registers the current tally as today's sales into local Sales History
+   * (merging into today's record if you submit more than once in a day),
+   * deducts stock, and clears the working tally. Returns null if there's
+   * nothing to submit.
    */
   async submitTodaysSales(): Promise<DailySalesRecord | null> {
     const counts = this.salesCount$.value;
@@ -262,30 +309,54 @@ export class DataService {
     const today = new Date().toISOString().slice(0, 10);
     const submittedAt = new Date().toISOString();
 
-    const rows = Object.entries(counts)
+    const newItems = Object.entries(counts)
       .filter(([, qty]) => qty > 0)
       .map(([productId, qty]) => {
         const product = products.find((p) => p.id === productId);
         return {
-          id: `${today}-${productId}-${Date.now()}`,
-          date: today,
           productId,
           productName: product?.name || productId,
           qty,
           priceAtSale: product?.sellingPrice || 0,
           costAtSale: product?.costPrice || 0,
-          submittedAt,
         };
       });
-    const totalRevenue = rows.reduce((sum, r) => sum + r.qty * r.priceAtSale, 0);
-    const totalProfit = rows.reduce((sum, r) => sum + r.qty * (r.priceAtSale - r.costAtSale), 0);
+    const totalRevenue = newItems.reduce((sum, r) => sum + r.qty * r.priceAtSale, 0);
+    const totalProfit = newItems.reduce((sum, r) => sum + r.qty * (r.priceAtSale - r.costAtSale), 0);
 
-    try {
-      await firstValueFrom(this.postSheet('SalesHistory', 'addMany', rows));
-    } catch (err) {
-      console.error('Failed to submit sales to Google Sheets', err);
-      return null;
+    const history = [...this.salesHistory$.value];
+    const idx = history.findIndex((h) => h.date === today);
+    let record: DailySalesRecord;
+    if (idx >= 0) {
+      const existing = history[idx];
+      const mergedItems = existing.items.map((i) => ({ ...i }));
+      for (const it of newItems) {
+        const found = mergedItems.find((m) => m.productId === it.productId);
+        if (found) found.qty += it.qty;
+        else mergedItems.push({ productId: it.productId, productName: it.productName, qty: it.qty });
+      }
+      record = {
+        date: today,
+        submittedAt,
+        items: mergedItems,
+        totalItems: existing.totalItems + totalItems,
+        totalRevenue: existing.totalRevenue + totalRevenue,
+        totalProfit: existing.totalProfit + totalProfit,
+      };
+      history[idx] = record;
+    } else {
+      record = {
+        date: today,
+        submittedAt,
+        items: newItems.map((i) => ({ productId: i.productId, productName: i.productName, qty: i.qty })),
+        totalItems,
+        totalRevenue,
+        totalProfit,
+      };
+      history.push(record);
     }
+    this.salesHistory$.next(history);
+    saveJSON(STORAGE_SALES_HISTORY, history);
 
     // Deduct sold quantities from local stock.
     const updatedProducts = products.map((p) => {
@@ -295,59 +366,63 @@ export class DataService {
     this.saveProducts(updatedProducts);
 
     this.resetSalesCounts();
-    this.refreshSalesHistory();
 
-    return {
-      date: today,
-      submittedAt,
-      items: rows.map((r) => ({ productId: r.productId, productName: r.productName, qty: r.qty })),
-      totalItems,
-      totalRevenue,
-      totalProfit,
-    };
+    return record;
   }
 
   refreshSalesHistory() {
-    this.getSheet<any>('SalesHistory').subscribe({
-      next: (rows) => {
-        const grouped: Record<string, DailySalesRecord> = {};
-        for (const r of rows) {
-          const date = r.date;
-          if (!date) continue;
-          if (!grouped[date]) {
-            grouped[date] = {
-              date,
-              submittedAt: r.submittedAt || '',
-              items: [],
-              totalItems: 0,
-              totalRevenue: 0,
-              totalProfit: 0,
-            };
-          }
-          const qty = Number(r.qty) || 0;
-          const price = Number(r.priceAtSale) || 0;
-          const cost = Number(r.costAtSale) || 0;
-          const existing = grouped[date].items.find((i) => i.productId === r.productId);
-          if (existing) existing.qty += qty;
-          else grouped[date].items.push({ productId: r.productId, productName: r.productName, qty });
-          grouped[date].totalItems += qty;
-          grouped[date].totalRevenue += qty * price;
-          grouped[date].totalProfit += qty * (price - cost);
-          if (r.submittedAt && r.submittedAt > grouped[date].submittedAt) {
-            grouped[date].submittedAt = r.submittedAt;
-          }
-        }
-        const list = Object.values(grouped).sort((a, b) => (a.date < b.date ? 1 : -1));
-        this.salesHistory$.next(list);
-      },
-      error: (err) => console.error('Failed to load SalesHistory from Google Sheets', err),
-    });
+    const stored = loadJSON<DailySalesRecord[]>(STORAGE_SALES_HISTORY, []);
+    this.salesHistory$.next(stored);
   }
   getSalesHistory() {
     return this.salesHistory$.asObservable();
   }
   getSalesHistorySnapshot() {
     return this.salesHistory$.value;
+  }
+
+  // ---- Income & Revenue reporting ----
+  // Derived from local Sales History (revenue/profit per day) and Expenses
+  // (raw material, equipment/investment, utilities). Recompute on demand —
+  // these read the current snapshots, so call again after data changes.
+  /** Per-month breakdown for a given year. */
+  getMonthlySummary(year: number) {
+    const history = this.salesHistory$.value;
+    const expenses = this.expenses$.value;
+    return Array.from({ length: 12 }, (_, i) => {
+      const prefix = `${year}-${String(i + 1).padStart(2, '0')}`;
+      const dayRecords = history.filter((h) => h.date.startsWith(prefix));
+      const monthExpenses = expenses.filter((e) => e.date.startsWith(prefix));
+      const revenue = dayRecords.reduce((s, h) => s + h.totalRevenue, 0);
+      const grossProfit = dayRecords.reduce((s, h) => s + h.totalProfit, 0);
+      const expenseTotal = monthExpenses.reduce((s, e) => s + e.amount, 0);
+      return {
+        month: i + 1,
+        label: new Date(year, i, 1).toLocaleString('default', { month: 'short' }),
+        revenue,
+        grossProfit,
+        expenses: expenseTotal,
+        netIncome: grossProfit - expenseTotal,
+      };
+    });
+  }
+  /** Full-year totals for a given year. */
+  getYearlySummary(year: number) {
+    const months = this.getMonthlySummary(year);
+    return {
+      year,
+      revenue: months.reduce((s, m) => s + m.revenue, 0),
+      grossProfit: months.reduce((s, m) => s + m.grossProfit, 0),
+      expenses: months.reduce((s, m) => s + m.expenses, 0),
+      netIncome: months.reduce((s, m) => s + m.netIncome, 0),
+    };
+  }
+  /** Years with any sales or expense records, plus the current year. */
+  getAvailableYears(): number[] {
+    const years = new Set<number>([new Date().getFullYear()]);
+    this.salesHistory$.value.forEach((h) => years.add(Number(h.date.slice(0, 4))));
+    this.expenses$.value.forEach((e) => years.add(Number(e.date.slice(0, 4))));
+    return Array.from(years).sort((a, b) => b - a);
   }
 
   // ---- Cart / Billing (stays local to the current billing session) ----
