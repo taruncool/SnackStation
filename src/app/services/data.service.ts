@@ -50,13 +50,20 @@ export interface Offer {
   active: boolean;
 }
 
-/** A one-off or recurring spend: raw material/ingredients, kitchen equipment
- *  or other investment (stove, gas connection, cooking tools), utilities,
+/** A one-off or recurring spend: raw material/ingredients, kitchen
+ *  appliances/equipment, store expenses, salaries, transport, utilities,
  *  or anything else that should reduce net income for its month. */
 export interface Expense {
   id: string;
   date: string; // YYYY-MM-DD
-  category: 'Raw Material' | 'Investment/Equipment' | 'Utility' | 'Other';
+  category:
+    | 'Raw Material'
+    | 'Kitchen Appliances'
+    | 'Store Expenses'
+    | 'Salaries'
+    | 'Transport Charges'
+    | 'Utility'
+    | 'Miscellaneous';
   name: string;
   amount: number;
   notes: string;

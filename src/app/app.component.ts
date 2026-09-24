@@ -61,6 +61,7 @@ export class AppComponent {
     { label: 'Categories', path: '/categories', icon: 'grid-outline' },
     { label: 'Customers', path: '/customers', icon: 'people-outline' },
     { label: 'Reports', path: '/reports', icon: 'bar-chart-outline' },
+    { label: 'Inventory', path: '/inventory', icon: 'cube-outline' },
     { label: 'Settings', path: '/settings', icon: 'settings-outline' },
   ];
 }

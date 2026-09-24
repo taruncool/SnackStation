@@ -1,93 +1,14 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { IonicModule, ModalController, AlertController, ToastController } from '@ionic/angular';
-import { DataService, Offer, Expense } from '../../services/data.service';
-
-const EXPENSE_CATEGORIES: Expense['category'][] = [
-  'Raw Material',
-  'Investment/Equipment',
-  'Utility',
-  'Other',
-];
-
-@Component({
-  selector: 'app-expense-form-modal',
-  standalone: true,
-  imports: [CommonModule, FormsModule, IonicModule],
-  template: `
-    <ion-header>
-      <ion-toolbar class="ss-toolbar">
-        <ion-title>{{ expense.id ? 'Edit Expense' : 'Add Expense' }}</ion-title>
-        <ion-buttons slot="end">
-          <ion-button (click)="dismiss()">Close</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-    <ion-content class="ion-padding">
-      <ion-item>
-        <ion-label position="stacked">What was it for?</ion-label>
-        <ion-input
-          [(ngModel)]="expense.name"
-          placeholder="e.g. Chicken (20kg), Gas stove, LPG refill"
-        ></ion-input>
-      </ion-item>
-      <ion-item>
-        <ion-label position="stacked">Category</ion-label>
-        <ion-select [(ngModel)]="expense.category">
-          <ion-select-option *ngFor="let c of categories" [value]="c">{{ c }}</ion-select-option>
-        </ion-select>
-      </ion-item>
-      <ion-item>
-        <ion-label position="stacked">Amount (₹)</ion-label>
-        <ion-input type="number" [(ngModel)]="expense.amount"></ion-input>
-      </ion-item>
-      <ion-item lines="none">
-        <ion-label position="stacked">Date</ion-label>
-        <ion-input type="date" [(ngModel)]="expense.date"></ion-input>
-      </ion-item>
-      <ion-item lines="none">
-        <ion-label position="stacked">Notes (optional)</ion-label>
-        <ion-textarea [(ngModel)]="expense.notes" rows="2"></ion-textarea>
-      </ion-item>
-
-      <ion-button expand="block" color="primary" style="margin-top:20px;" (click)="save()">
-        Save Expense
-      </ion-button>
-    </ion-content>
-  `,
-})
-export class ExpenseFormModal {
-  categories = EXPENSE_CATEGORIES;
-  expense: Partial<Expense> = {
-    category: 'Raw Material',
-    amount: 0,
-    date: new Date().toISOString().slice(0, 10),
-    notes: '',
-  };
-
-  constructor(private modalCtrl: ModalController, private data: DataService) {}
-
-  dismiss() {
-    this.modalCtrl.dismiss();
-  }
-
-  save() {
-    if (!this.expense.name || !this.expense.amount || !this.expense.date) return;
-    if (this.expense.id) {
-      this.data.updateExpense(this.expense as Expense);
-    } else {
-      const id = 'E' + Date.now();
-      this.data.addExpense({ ...(this.expense as Expense), id });
-    }
-    this.modalCtrl.dismiss();
-  }
-}
+import { RouterLink } from '@angular/router';
+import { IonicModule, ToastController } from '@ionic/angular';
+import { DataService, Offer } from '../../services/data.service';
 
 @Component({
   selector: 'app-reports',
   standalone: true,
-  imports: [CommonModule, FormsModule, IonicModule],
+  imports: [CommonModule, FormsModule, IonicModule, RouterLink],
   template: `
     <ion-header>
       <ion-toolbar class="ss-toolbar">
@@ -151,51 +72,23 @@ export class ExpenseFormModal {
             </ion-list>
             <p style="font-size:12px; color:var(--ion-color-medium); margin-top:8px;">
               Net income = gross profit from sales (Sales Count → Submit Today's Sales) minus
-              expenses logged below, per month.
+              expenses logged in
+              <a routerLink="/inventory" style="color:var(--ion-color-primary); font-weight:600;">Inventory & Expenses</a>, per month.
             </p>
           </ion-card-content>
         </ion-card>
 
-        <!-- Expenses / Inventory -->
-        <ion-card class="ss-card">
-          <ion-card-header style="display:flex; flex-direction:row; align-items:center; justify-content:space-between;">
-            <ion-card-title style="font-size:16px;">Expenses & Inventory</ion-card-title>
-            <ion-button size="small" fill="clear" (click)="openExpenseForm()">
-              <ion-icon slot="icon-only" name="add-circle-outline"></ion-icon>
-            </ion-button>
-          </ion-card-header>
-          <ion-card-content>
-            <p style="font-size:12px; color:var(--ion-color-medium); margin-top:0;">
-              Log purchases, raw material, and investments (kitchen/cooking tools, gas, stove,
-              etc.) here — they're what gets subtracted from sales revenue above.
-            </p>
-            <ion-list lines="full" *ngIf="expenses.length > 0">
-              <ion-item *ngFor="let e of expenses">
-                <ion-label>
-                  <h3 style="font-weight:600;">{{ e.name }}</h3>
-                  <p>
-                    <ion-badge [color]="badgeColor(e.category)" style="margin-right:6px;">{{
-                      e.category
-                    }}</ion-badge>
-                    {{ e.date }}
-                  </p>
-                </ion-label>
-                <div slot="end" style="text-align:right;">
-                  <div style="font-weight:700;">₹{{ e.amount | number }}</div>
-                  <ion-button
-                    size="small"
-                    fill="clear"
-                    color="danger"
-                    (click)="confirmDeleteExpense(e)"
-                  >
-                    <ion-icon slot="icon-only" name="trash-outline"></ion-icon>
-                  </ion-button>
-                </div>
-              </ion-item>
-            </ion-list>
-            <p *ngIf="expenses.length === 0" class="ion-text-center" style="color:var(--ion-color-medium);">
-              No expenses logged yet — tap + to add one.
-            </p>
+        <!-- Inventory & Expenses summary -->
+        <ion-card class="ss-card" button routerLink="/inventory">
+          <ion-card-content style="display:flex; align-items:center; justify-content:space-between;">
+            <div>
+              <div style="font-weight:700; font-size:15px;">Inventory & Expenses</div>
+              <div style="font-size:12px; color:var(--ion-color-medium); margin-top:2px;">
+                Raw material, kitchen appliances, store expenses, salaries, transport & more
+              </div>
+              <div style="font-weight:700; margin-top:6px;">₹{{ totalExpensesThisYear | number }} logged in {{ selectedYear }}</div>
+            </div>
+            <ion-icon name="chevron-forward-outline" style="font-size:22px; color:var(--ion-color-medium);"></ion-icon>
           </ion-card-content>
         </ion-card>
 
@@ -279,23 +172,14 @@ export class ExpenseFormModal {
 export class ReportsPage {
   dashboard = this.data.dashboard;
   offers: Offer[] = [];
-  expenses: Expense[] = [];
   years: number[] = [];
   selectedYear = new Date().getFullYear();
   monthlySummary = this.data.getMonthlySummary(this.selectedYear);
   yearlySummary = this.data.getYearlySummary(this.selectedYear);
 
-  constructor(
-    private data: DataService,
-    private modalCtrl: ModalController,
-    private alertCtrl: AlertController,
-    private toastCtrl: ToastController
-  ) {
+  constructor(private data: DataService, private toastCtrl: ToastController) {
     this.data.getOffers().subscribe((o) => (this.offers = o));
-    this.data.getExpenses().subscribe((e) => {
-      this.expenses = [...e].sort((a, b) => (a.date < b.date ? 1 : -1));
-      this.recompute();
-    });
+    this.data.getExpenses().subscribe(() => this.recompute());
     this.data.getSalesHistory().subscribe(() => this.recompute());
     this.years = this.data.getAvailableYears();
   }
@@ -306,42 +190,12 @@ export class ReportsPage {
     this.yearlySummary = this.data.getYearlySummary(this.selectedYear);
   }
 
+  get totalExpensesThisYear() {
+    return this.yearlySummary.expenses;
+  }
+
   onYearChange() {
     this.recompute();
-  }
-
-  badgeColor(category: string) {
-    switch (category) {
-      case 'Raw Material':
-        return 'warning';
-      case 'Investment/Equipment':
-        return 'tertiary';
-      case 'Utility':
-        return 'secondary';
-      default:
-        return 'medium';
-    }
-  }
-
-  async openExpenseForm() {
-    const modal = await this.modalCtrl.create({ component: ExpenseFormModal });
-    await modal.present();
-  }
-
-  async confirmDeleteExpense(e: Expense) {
-    const alert = await this.alertCtrl.create({
-      header: 'Delete expense?',
-      message: `Remove "${e.name}" (₹${e.amount})? This cannot be undone.`,
-      buttons: [
-        { text: 'Cancel', role: 'cancel' },
-        {
-          text: 'Delete',
-          role: 'destructive',
-          handler: () => this.data.deleteExpense(e.id),
-        },
-      ],
-    });
-    await alert.present();
   }
 
   async exportAs(format: string) {
