@@ -3,6 +3,8 @@ import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { BehaviorSubject, firstValueFrom } from 'rxjs';
 import { environment } from '../../environments/environment';
 import dashboardData from '../data/dashboard.json';
+import productsData from '../data/products.json';
+import categoriesData from '../data/categories.json';
 
 export interface Product {
   id: string;
@@ -62,6 +64,9 @@ export interface DailySalesRecord {
 }
 
 const STORAGE_WORKING = 'snackstation_sales_working';
+// Products are local-only for now (see products.json) — no backend table yet,
+// so edits are kept in localStorage until a real database/API replaces this.
+const STORAGE_PRODUCTS = 'snackstation_products';
 
 function loadJSON<T>(key: string, fallback: T): T {
   try {
@@ -122,7 +127,7 @@ export class DataService {
       );
     }
     this.refreshProducts();
-    this.refreshCategories();
+    this.categories$.next(categoriesData as Category[]);
     this.refreshCustomers();
     this.refreshOffers();
     this.refreshSalesHistory();
@@ -145,14 +150,13 @@ export class DataService {
   }
 
   // ---- Products ----
+  // Local-only for now: seeded from products.json, edits persisted to
+  // localStorage. Swap this for a real API/database call once one exists —
+  // every other page only talks to the public methods below, so that's the
+  // only place that will need to change.
   refreshProducts() {
-    this.getSheet<Product>('Products').subscribe({
-      next: (rows) =>
-        this.products$.next(
-          rows.map((r) => coerce<Product>(r, ['costPrice', 'sellingPrice', 'gst', 'stockQty', 'minStock']))
-        ),
-      error: (err) => console.error('Failed to load Products from Google Sheets', err),
-    });
+    const stored = loadJSON<Product[] | null>(STORAGE_PRODUCTS, null);
+    this.products$.next(stored ?? (productsData as Product[]));
   }
   getProducts() {
     return this.products$.asObservable();
@@ -160,32 +164,22 @@ export class DataService {
   getProductsSnapshot() {
     return this.products$.value;
   }
+  private saveProducts(products: Product[]) {
+    this.products$.next(products);
+    saveJSON(STORAGE_PRODUCTS, products);
+  }
   addProduct(product: Product) {
-    this.postSheet('Products', 'add', product).subscribe({
-      next: () => this.refreshProducts(),
-      error: (err) => console.error('Failed to add product', err),
-    });
+    this.saveProducts([...this.products$.value, product]);
   }
   updateProduct(updated: Product) {
-    this.postSheet('Products', 'update', updated).subscribe({
-      next: () => this.refreshProducts(),
-      error: (err) => console.error('Failed to update product', err),
-    });
+    this.saveProducts(this.products$.value.map((p) => (p.id === updated.id ? updated : p)));
   }
   deleteProduct(id: string) {
-    this.postSheet('Products', 'delete', { id }).subscribe({
-      next: () => this.refreshProducts(),
-      error: (err) => console.error('Failed to delete product', err),
-    });
+    this.saveProducts(this.products$.value.filter((p) => p.id !== id));
   }
 
-  // ---- Categories (read-only for now) ----
-  refreshCategories() {
-    this.getSheet<Category>('Categories').subscribe({
-      next: (rows) => this.categories$.next(rows.map((r) => coerce<Category>(r, ['productCount']))),
-      error: (err) => console.error('Failed to load Categories from Google Sheets', err),
-    });
-  }
+  // ---- Categories ----
+  // Local-only too, from categories.json (see Products above).
   getCategories() {
     return this.categories$.asObservable();
   }
@@ -293,30 +287,15 @@ export class DataService {
       return null;
     }
 
-    // Deduct sold quantities from stock. Sends the FULL updated product row
-    // (not just id + stockQty) because the sheet's "update" actions replace
-    // the entire row — sending a partial object would blank out the other
-    // columns.
-    const stockUpdates = Object.entries(counts)
-      .filter(([, qty]) => qty > 0)
-      .map(([productId, qty]) => {
-        const product = products.find((p) => p.id === productId);
-        if (!product) return null;
-        return { ...product, stockQty: Math.max(0, product.stockQty - qty) };
-      })
-      .filter((p): p is Product => p !== null);
-
-    if (stockUpdates.length > 0) {
-      try {
-        await firstValueFrom(this.postSheet('Products', 'updateMany', stockUpdates));
-      } catch (err) {
-        console.error('Sales were recorded, but deducting stock failed', err);
-      }
-    }
+    // Deduct sold quantities from local stock.
+    const updatedProducts = products.map((p) => {
+      const qty = counts[p.id] || 0;
+      return qty > 0 ? { ...p, stockQty: Math.max(0, p.stockQty - qty) } : p;
+    });
+    this.saveProducts(updatedProducts);
 
     this.resetSalesCounts();
     this.refreshSalesHistory();
-    this.refreshProducts();
 
     return {
       date: today,

@@ -70,7 +70,7 @@ export class ProductFormModal {
     category: 'Snacks',
     unit: 'piece',
     status: 'active',
-    image: 'default',
+    image: '',
   };
   categories: { name: string }[] = [];
 
@@ -117,6 +117,17 @@ export class ProductFormModal {
           [(ngModel)]="query"
         ></ion-searchbar>
       </ion-toolbar>
+      <ion-toolbar>
+        <div class="ss-cat-filter">
+          <ion-chip
+            *ngFor="let c of categoryOptions"
+            [class.active]="selectedCategory === c"
+            (click)="selectedCategory = c"
+          >
+            {{ c }}
+          </ion-chip>
+        </div>
+      </ion-toolbar>
     </ion-header>
 
     <ion-content>
@@ -158,21 +169,51 @@ export class ProductFormModal {
       </div>
     </ion-content>
   `,
+  styles: [`
+    .ss-cat-filter {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 0 12px 10px;
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    .ss-cat-filter::-webkit-scrollbar { display: none; }
+    .ss-cat-filter ion-chip {
+      margin: 0;
+      flex-shrink: 0;
+      --background: #fff;
+      border: 1px solid var(--ion-color-light-shade, #ddd);
+      color: var(--ion-color-dark);
+    }
+    .ss-cat-filter ion-chip.active {
+      --background: var(--ion-color-primary);
+      color: #fff;
+      border-color: var(--ion-color-primary);
+    }
+  `],
 })
 export class ProductsPage {
   products: Product[] = [];
   query = '';
+  categoryOptions: string[] = ['All'];
+  selectedCategory = 'All';
 
   constructor(private data: DataService, private modalCtrl: ModalController) {
     this.data.getProducts().subscribe((p) => (this.products = p));
+    this.data.getCategories().subscribe((cats) => {
+      this.categoryOptions = ['All', ...cats.map((c) => c.name)];
+    });
   }
 
   get filtered() {
     const q = this.query.toLowerCase().trim();
-    if (!q) return this.products;
-    return this.products.filter(
-      (p) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q)
-    );
+    return this.products.filter((p) => {
+      const matchesCategory = this.selectedCategory === 'All' || p.category === this.selectedCategory;
+      const matchesQuery =
+        !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+      return matchesCategory && matchesQuery;
+    });
   }
 
   async openForm(product?: Product) {
@@ -184,6 +225,6 @@ export class ProductsPage {
   }
 
   imgSrc(p: Product) {
-    return `assets/products/${p.image || 'default'}.svg`;
+    return p.image ? `assets/images/products/${p.image}.jpg` : 'assets/products/default.svg';
   }
 }

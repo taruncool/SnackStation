@@ -1,7 +1,6 @@
 [
-  { "id": "cat-01", "name": "Snacks", "icon": "fast-food-outline", "productCount": 5 },
-  { "id": "cat-02", "name": "Beverages", "icon": "cafe-outline", "productCount": 2 },
-  { "id": "cat-03", "name": "Bakery", "icon": "pizza-outline", "productCount": 1 },
-  { "id": "cat-04", "name": "Frozen Foods", "icon": "snow-outline", "productCount": 1 },
-  { "id": "cat-05", "name": "Dairy", "icon": "water-outline", "productCount": 0 }
+  { "id": "cat-01", "name": "Snacks", "icon": "fast-food-outline", "productCount": 6 },
+  { "id": "cat-02", "name": "Fast Food", "icon": "pizza-outline", "productCount": 16 },
+  { "id": "cat-03", "name": "Beverages", "icon": "cafe-outline", "productCount": 2 },
+  { "id": "cat-04", "name": "Ice Cream", "icon": "snow-outline", "productCount": 0 }
 ]
