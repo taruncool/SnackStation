@@ -71,9 +71,11 @@ import { DataService, Offer } from '../../services/data.service';
               </ion-item>
             </ion-list>
             <p style="font-size:12px; color:var(--ion-color-medium); margin-top:8px;">
-              Net income = gross profit from sales (Sales Count → Submit Today's Sales) minus
-              expenses logged in
-              <a routerLink="/inventory" style="color:var(--ion-color-primary); font-weight:600;">Inventory & Expenses</a>, per month.
+              Net income = Total Sales − Total Expenses (Raw Material, Kitchen Appliances, Store
+              Expenses, Salaries, Transport, Utility, Misc — everything logged in
+              <a routerLink="/inventory" style="color:var(--ion-color-primary); font-weight:600;">Inventory & Expenses</a>).
+              This is your real profit — separate from each product's estimated pricing margin on
+              the Products page.
             </p>
           </ion-card-content>
         </ion-card>

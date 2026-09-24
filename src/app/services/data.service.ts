@@ -393,6 +393,17 @@ export class DataService {
   // (raw material, equipment/investment, utilities). Recompute on demand —
   // these read the current snapshots, so call again after data changes.
   /** Per-month breakdown for a given year. */
+  // ---- Income & Revenue reporting ----
+  // Derived from local Sales History (revenue per day) and Expenses (every
+  // category, summed). Real-market flow for a small food business: Net
+  // Profit = Total Sales − Total Expenses, full stop — no separate "gross
+  // vs net" layering, and Raw Material purchases (what you actually spent
+  // on ingredients) are what hit this number, not each product's costPrice.
+  // costPrice stays on Products purely as a menu-pricing/margin helper —
+  // "estimatedMargin" below reflects that pricing estimate for reference
+  // only and is intentionally NOT part of netIncome, to avoid subtracting
+  // ingredient cost twice (once per item sold, once as the real purchase).
+  /** Per-month breakdown for a given year. */
   getMonthlySummary(year: number) {
     const history = this.salesHistory$.value;
     const expenses = this.expenses$.value;
@@ -401,15 +412,15 @@ export class DataService {
       const dayRecords = history.filter((h) => h.date.startsWith(prefix));
       const monthExpenses = expenses.filter((e) => e.date.startsWith(prefix));
       const revenue = dayRecords.reduce((s, h) => s + h.totalRevenue, 0);
-      const grossProfit = dayRecords.reduce((s, h) => s + h.totalProfit, 0);
+      const estimatedMargin = dayRecords.reduce((s, h) => s + h.totalProfit, 0);
       const expenseTotal = monthExpenses.reduce((s, e) => s + e.amount, 0);
       return {
         month: i + 1,
         label: new Date(year, i, 1).toLocaleString('default', { month: 'short' }),
         revenue,
-        grossProfit,
+        estimatedMargin,
         expenses: expenseTotal,
-        netIncome: grossProfit - expenseTotal,
+        netIncome: revenue - expenseTotal,
       };
     });
   }
@@ -419,7 +430,7 @@ export class DataService {
     return {
       year,
       revenue: months.reduce((s, m) => s + m.revenue, 0),
-      grossProfit: months.reduce((s, m) => s + m.grossProfit, 0),
+      estimatedMargin: months.reduce((s, m) => s + m.estimatedMargin, 0),
       expenses: months.reduce((s, m) => s + m.expenses, 0),
       netIncome: months.reduce((s, m) => s + m.netIncome, 0),
     };
