@@ -295,6 +295,6 @@ export class SalesCountPage {
   }
 
   imgSrc(p: Product) {
-    return `assets/products/${p.image || 'default'}.svg`;
+    return p.image ? `assets/images/products/${p.image}.jpg` : 'assets/products/default.svg';
   }
 }
