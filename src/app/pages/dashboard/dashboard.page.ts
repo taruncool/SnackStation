@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { IonicModule } from '@ionic/angular';
-import { DataService, Product } from '../../services/data.service';
+import { DataService, Product, DailySalesRecord } from '../../services/data.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -18,7 +18,7 @@ import { DataService, Product } from '../../services/data.service';
         <ion-title class="brand-heading" style="font-size:18px;">Dashboard</ion-title>
       </ion-toolbar>
       <ion-toolbar class="ss-toolbar ss-range-toolbar">
-        <ion-segment [(ngModel)]="range" scrollable class="ss-segment">
+        <ion-segment [(ngModel)]="range" (ionChange)="onRangeChange()" scrollable class="ss-segment">
           <ion-segment-button value="daily"><ion-label>Day</ion-label></ion-segment-button>
           <ion-segment-button value="weekly"><ion-label>Week</ion-label></ion-segment-button>
           <ion-segment-button value="monthly"><ion-label>Month</ion-label></ion-segment-button>
@@ -33,8 +33,8 @@ import { DataService, Product } from '../../services/data.service';
           <ion-row>
             <ion-col size="6" size-md="3">
               <div class="ss-stat-card ss-card">
-                <div class="ss-stat-value">₹{{ todayRevenue | number }}</div>
-                <div class="ss-stat-label">Revenue<span class="ss-live-dot" title="Live from submitted sales"></span></div>
+                <div class="ss-stat-value">₹{{ revenue | number }}</div>
+                <div class="ss-stat-label">Revenue ({{ rangeLabel() }})<span class="ss-live-dot" title="Live from submitted sales"></span></div>
               </div>
             </ion-col>
             <ion-col size="6" size-md="3">
@@ -46,24 +46,24 @@ import { DataService, Product } from '../../services/data.service';
             <ion-col size="6" size-md="3">
               <div class="ss-stat-card ss-card" (click)="goToSalesCount()" style="cursor:pointer;">
                 <div class="ss-stat-value">
-                  {{ dashboard.itemsSold }}
+                  {{ itemsSold }}
                   <ion-badge
-                    *ngIf="liveCount > 0"
+                    *ngIf="range === 'daily' && liveCount > 0"
                     color="secondary"
                     style="font-size:11px; vertical-align:top; margin-left:2px;"
                     >+{{ liveCount }}</ion-badge
                   >
                 </div>
                 <div class="ss-stat-label">
-                  Items Sold
+                  Items Sold ({{ rangeLabel() }})
                   <ion-icon name="chevron-forward-outline" style="font-size:12px;"></ion-icon>
                 </div>
               </div>
             </ion-col>
             <ion-col size="6" size-md="3">
               <div class="ss-stat-card ss-card">
-                <div class="ss-stat-value">₹{{ todayProfit | number }}</div>
-                <div class="ss-stat-label">Profit<span class="ss-live-dot" title="Live from submitted sales"></span></div>
+                <div class="ss-stat-value">₹{{ profit | number }}</div>
+                <div class="ss-stat-label">Profit ({{ rangeLabel() }})<span class="ss-live-dot" title="Live from submitted sales"></span></div>
               </div>
             </ion-col>
           </ion-row>
@@ -93,18 +93,21 @@ import { DataService, Product } from '../../services/data.service';
             <ion-col size="12" size-md="6">
               <ion-card class="ss-card">
                 <ion-card-header>
-                  <ion-card-title style="font-size:16px;">Top Selling Products</ion-card-title>
+                  <ion-card-title style="font-size:16px;">Top Selling Products ({{ rangeLabel() }})</ion-card-title>
                 </ion-card-header>
                 <ion-list lines="full">
-                  <ion-item *ngFor="let p of dashboard.topSellingProducts">
+                  <ion-item *ngFor="let p of topSelling">
                     <img
                       slot="start"
-                      [src]="imgSrcByName(p.name)"
+                      [src]="imgSrcForImage(p.image)"
                       [alt]="p.name"
                       style="width:36px; height:36px; border-radius:8px; object-fit:cover;"
                     />
                     <ion-label>{{ p.name }}</ion-label>
                     <ion-note slot="end">{{ p.unitsSold }} sold</ion-note>
+                  </ion-item>
+                  <ion-item *ngIf="topSelling.length === 0">
+                    <ion-label color="medium">No sales submitted for {{ rangeLabel() | lowercase }} yet</ion-label>
                   </ion-item>
                 </ion-list>
               </ion-card>
@@ -194,28 +197,83 @@ import { DataService, Product } from '../../services/data.service';
 })
 export class DashboardPage {
   dashboard = this.data.dashboard;
-  range: 'daily' | 'weekly' | 'monthly' = 'daily';
+  range: 'daily' | 'weekly' | 'monthly' | 'yearly' = 'daily';
   lowStock: Product[] = [];
   liveCount = 0;
-  todayRevenue = 0;
-  todayProfit = 0;
+  revenue = 0;
+  profit = 0;
+  itemsSold = 0;
+  topSelling: { name: string; image: string; unitsSold: number }[] = [];
   private allProducts: Product[] = [];
+  private salesHistory: DailySalesRecord[] = [];
 
   constructor(private data: DataService, private router: Router) {
     this.data.getProducts().subscribe((products) => {
       this.allProducts = products;
       this.lowStock = products.filter((p) => p.stockQty <= p.minStock);
+      this.recompute();
     });
     this.data.getSalesCounts().subscribe(() => {
       this.liveCount = this.data.getTotalSalesCountToday();
     });
     this.data.getSalesHistory().subscribe((history) => {
-      const today = new Date().toISOString().slice(0, 10);
-      const record = history.find((r) => r.date === today);
-      this.todayRevenue = record?.totalRevenue || 0;
-      this.todayProfit = record?.totalProfit || 0;
+      this.salesHistory = history;
+      this.recompute();
     });
     this.data.refreshSalesHistory();
+  }
+
+  onRangeChange() {
+    this.recompute();
+  }
+
+  private recordsInRange(): DailySalesRecord[] {
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    return this.salesHistory.filter((r) => {
+      if (this.range === 'daily') return r.date === todayStr;
+      if (this.range === 'weekly') {
+        const diffDays = (now.getTime() - new Date(r.date + 'T00:00:00').getTime()) / 86400000;
+        return diffDays >= 0 && diffDays < 7;
+      }
+      if (this.range === 'monthly') return r.date.slice(0, 7) === todayStr.slice(0, 7);
+      if (this.range === 'yearly') return r.date.slice(0, 4) === todayStr.slice(0, 4);
+      return false;
+    });
+  }
+
+  private recompute() {
+    const records = this.recordsInRange();
+    this.revenue = records.reduce((s, r) => s + r.totalRevenue, 0);
+    this.profit = records.reduce((s, r) => s + r.totalProfit, 0);
+    this.itemsSold = records.reduce((s, r) => s + r.totalItems, 0);
+
+    const qtyByProduct: Record<string, number> = {};
+    for (const r of records) {
+      for (const item of r.items) {
+        qtyByProduct[item.productId] = (qtyByProduct[item.productId] || 0) + item.qty;
+      }
+    }
+    this.topSelling = Object.entries(qtyByProduct)
+      .map(([productId, qty]) => {
+        const product = this.allProducts.find((p) => p.id === productId);
+        return { name: product?.name || productId, image: product?.image || '', unitsSold: qty };
+      })
+      .sort((a, b) => b.unitsSold - a.unitsSold)
+      .slice(0, 4);
+  }
+
+  rangeLabel() {
+    switch (this.range) {
+      case 'daily':
+        return 'Today';
+      case 'weekly':
+        return 'This Week';
+      case 'monthly':
+        return 'This Month';
+      case 'yearly':
+        return 'This Year';
+    }
   }
 
   goToSalesCount() {
@@ -223,11 +281,10 @@ export class DashboardPage {
   }
 
   imgSrc(p: Product) {
-    return `assets/products/${p.image || 'default'}.svg`;
+    return p.image ? `assets/images/products/${p.image}.jpg` : 'assets/products/default.svg';
   }
 
-  imgSrcByName(name: string) {
-    const match = this.allProducts.find((p) => p.name.toLowerCase() === name.toLowerCase());
-    return `assets/products/${match?.image || 'default'}.svg`;
+  imgSrcForImage(image: string) {
+    return image ? `assets/images/products/${image}.jpg` : 'assets/products/default.svg';
   }
 }
