@@ -26,6 +26,7 @@ free Google Apps Script turns it into a JSON API the app talks to.
 6. Click **SnackStation > Seed Demo Data** again (the permissions step sometimes cancels the first click — just retry).
 7. You should see a popup: "SnackStation sheet tabs created and seeded ✅".
 8. Look at the tabs along the bottom of the Sheet — you should now see 6: **Products, Categories, Customers, Offers, SalesHistory, Expenses**, with all but SalesHistory (which starts empty) pre-filled with demo data.
+9. Optional: click **SnackStation > Seed Sample Sales History** to fill SalesHistory with realistic demo sales spanning today/this week/this month/this year, so the Dashboard and Reports pages have something to show instead of ₹0 everywhere. This is a separate menu action on purpose — running it again later only refreshes SalesHistory, it never touches Products/Customers/etc. Don't run it once you have real sales you want to keep, since it overwrites the whole tab.
 
 ## 4. Deploy as a Web App
 

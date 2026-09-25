@@ -22,6 +22,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('SnackStation')
     .addItem('Seed Demo Data', 'seedSnackStationData')
+    .addItem('Seed Sample Sales History', 'seedSampleSalesHistory')
     .addToUi();
 }
 
@@ -250,6 +251,87 @@ function seedSnackStationData() {
     // no-op — see comment above
   }
 }
+
+/**
+ * Fills the SalesHistory tab with realistic demo sales spanning today, this
+ * week, this month, and earlier this year — so Dashboard/Reports' Day, Week,
+ * Month, and Year tabs all have something to show instead of ₹0 everywhere.
+ * Dates are computed relative to whenever you run this (not hardcoded), so
+ * it looks right no matter when you seed it.
+ *
+ * SEPARATE from "Seed Demo Data" on purpose: this ONLY touches SalesHistory,
+ * so re-running it later never wipes your real Products/Customers/etc, and
+ * you can safely run it again if you want a fresh batch of demo sales.
+ * (It DOES overwrite whatever is currently in SalesHistory, so don't run
+ * this once you have real sales you want to keep — that's what "Submit
+ * Today's Sales" in the app is for.)
+ */
+function seedSampleSalesHistory() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone() || 'Etc/UTC';
+  var today = new Date();
+
+  // A handful of real products (id/name/price/cost must match the Products
+  // tab) to spread sample sales across.
+  var sampleProducts = [
+    { id: 'P001', name: 'Chicken Pop Corn', price: 99, cost: 60 },
+    { id: 'P002', name: 'Chicken Classic', price: 129, cost: 78 },
+    { id: 'P005', name: 'Chicken Strips', price: 139, cost: 84 },
+    { id: 'P006', name: 'Classic Chicken Burger', price: 169, cost: 102 },
+    { id: 'P010', name: 'French Fries', price: 69, cost: 35 },
+    { id: 'P011', name: 'Kinley', price: 20, cost: 12 },
+  ];
+  // Base quantity per product, and how many days back from today each
+  // "sales day" is, with a rough multiplier so numbers vary a bit rather
+  // than repeating identically.
+  var baseQty = [6, 4, 5, 3, 7, 9];
+  var salesDays = [
+    { daysAgo: 0, mult: 1.0 }, // today
+    { daysAgo: 1, mult: 0.9 },
+    { daysAgo: 2, mult: 1.1 },
+    { daysAgo: 3, mult: 0.8 }, // still this week
+    { daysAgo: 6, mult: 1.2 },
+    { daysAgo: 12, mult: 0.9 }, // still this month
+    { daysAgo: 20, mult: 1.0 },
+    { daysAgo: 45, mult: 0.8 }, // earlier this year
+    { daysAgo: 90, mult: 1.1 },
+  ];
+
+  var rows = [];
+  salesDays.forEach(function (day) {
+    var d = new Date(today.getTime() - day.daysAgo * 24 * 60 * 60 * 1000);
+    var dateStr = Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+    var submittedAt = d.toISOString();
+    sampleProducts.forEach(function (p, idx) {
+      var qty = Math.max(1, Math.round(baseQty[idx] * day.mult));
+      rows.push([
+        dateStr + '-' + p.id + '-demo' + day.daysAgo,
+        dateStr,
+        p.id,
+        p.name,
+        qty,
+        p.price,
+        p.cost,
+        submittedAt,
+      ]);
+    });
+  });
+
+  setSheetData(
+    ss,
+    'SalesHistory',
+    ['id', 'date', 'productId', 'productName', 'qty', 'priceAtSale', 'costAtSale', 'submittedAt'],
+    rows
+  );
+
+  Logger.log('Seeded ' + rows.length + ' sample SalesHistory rows.');
+  try {
+    SpreadsheetApp.getUi().alert('Seeded ' + rows.length + ' sample sales rows across today/this week/this month/this year ✅');
+  } catch (err) {
+    // no-op — see comment in seedSnackStationData
+  }
+}
+
 function setSheetData(ss, name, headers, rows) {
   var sheet = ss.getSheetByName(name);
   if (!sheet) sheet = ss.insertSheet(name);
