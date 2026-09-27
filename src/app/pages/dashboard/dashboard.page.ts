@@ -48,10 +48,10 @@ import { DataService, Product, DailySalesRecord } from '../../services/data.serv
                 <div class="ss-stat-value">
                   {{ itemsSold }}
                   <ion-badge
-                    *ngIf="range === 'daily' && liveCount > 0"
+                    *ngIf="range === 'daily' && unsubmittedCount > 0"
                     color="secondary"
                     style="font-size:11px; vertical-align:top; margin-left:2px;"
-                    >+{{ liveCount }}</ion-badge
+                    >+{{ unsubmittedCount }}</ion-badge
                   >
                 </div>
                 <div class="ss-stat-label">
@@ -200,6 +200,7 @@ export class DashboardPage {
   range: 'daily' | 'weekly' | 'monthly' | 'yearly' = 'daily';
   lowStock: Product[] = [];
   liveCount = 0;
+  unsubmittedCount = 0;
   revenue = 0;
   profit = 0;
   itemsSold = 0;
@@ -215,6 +216,7 @@ export class DashboardPage {
     });
     this.data.getSalesCounts().subscribe(() => {
       this.liveCount = this.data.getTotalSalesCountToday();
+      this.unsubmittedCount = this.data.getUnsubmittedCountToday();
     });
     this.data.getSalesHistory().subscribe((history) => {
       this.salesHistory = history;

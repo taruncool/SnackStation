@@ -90,6 +90,14 @@ export interface DailySalesRecord {
 // instant taps, no network round trip) — everything else below now lives in
 // your Google Sheet, see the class comment.
 const STORAGE_WORKING = 'snackstation_sales_working';
+// Which calendar day the working tally above belongs to — lets the tally
+// (and what's already been submitted) reset automatically at midnight
+// instead of silently carrying into a new day.
+const STORAGE_WORKING_DATE = 'snackstation_sales_working_date';
+// How much of the working tally has already been sent to SalesHistory —
+// lets the displayed count stay visible after "Submit Today's Sales"
+// (rather than resetting to 0) while still only submitting each tap once.
+const STORAGE_SUBMITTED_BASELINE = 'snackstation_sales_submitted_baseline';
 
 function loadJSON<T>(key: string, fallback: T): T {
   try {
@@ -140,9 +148,11 @@ export class DataService {
   private offers$ = new BehaviorSubject<Offer[]>([]);
   private expenses$ = new BehaviorSubject<Expense[]>([]);
   private cart$ = new BehaviorSubject<CartItem[]>([]);
-  private salesCount$ = new BehaviorSubject<Record<string, number>>(
-    loadJSON<Record<string, number>>(STORAGE_WORKING, {})
-  );
+  private salesCount$ = new BehaviorSubject<Record<string, number>>({});
+  /** How much of salesCount$ has already been sent to SalesHistory — a
+   *  per-product submitted-so-far baseline, not exposed as an observable
+   *  since only submitTodaysSales()'s delta math needs it. */
+  private submittedBaseline: Record<string, number> = {};
   private salesHistory$ = new BehaviorSubject<DailySalesRecord[]>([]);
 
   /** Still static demo figures — see google-apps-script/SETUP.md for what's live vs. not yet. */
@@ -160,6 +170,24 @@ export class DataService {
     this.refreshOffers();
     this.refreshExpenses();
     this.refreshSalesHistory();
+    this.loadWorkingTally();
+  }
+
+  /** Loads today's working tally + submitted baseline from localStorage,
+   *  or starts fresh if the stored tally belongs to a previous day. */
+  private loadWorkingTally() {
+    const today = new Date().toISOString().slice(0, 10);
+    const storedDate = loadJSON<string | null>(STORAGE_WORKING_DATE, null);
+    if (storedDate !== today) {
+      this.salesCount$.next({});
+      this.submittedBaseline = {};
+      saveJSON(STORAGE_WORKING_DATE, today);
+      saveJSON(STORAGE_WORKING, {});
+      saveJSON(STORAGE_SUBMITTED_BASELINE, {});
+      return;
+    }
+    this.salesCount$.next(loadJSON<Record<string, number>>(STORAGE_WORKING, {}));
+    this.submittedBaseline = loadJSON<Record<string, number>>(STORAGE_SUBMITTED_BASELINE, {});
   }
 
   // Apps Script Web App GET responses are cacheable by the browser, so a
@@ -299,7 +327,14 @@ export class DataService {
 
   // ---- Today's Sales Count (tap-to-count tally, separate from Billing cart) ----
   // Working counts persist to localStorage (per device, instant) so a page
-  // refresh never loses today's in-progress tally.
+  // refresh never loses today's in-progress tally, and roll over to a fresh
+  // empty tally automatically at midnight (see loadWorkingTally()).
+  //
+  // The displayed count is cumulative for the whole day and stays visible
+  // even after "Submit Today's Sales" — submittedBaseline tracks how much
+  // of it has already been sent, so re-tapping more and submitting again
+  // later only sends the NEW items, never double-counting what's already
+  // in SalesHistory.
   getSalesCounts() {
     return this.salesCount$.asObservable();
   }
@@ -307,56 +342,76 @@ export class DataService {
     return this.salesCount$.value;
   }
   incrementSale(productId: string) {
+    this.loadWorkingTally();
     const counts = { ...this.salesCount$.value };
     counts[productId] = (counts[productId] || 0) + 1;
     this.salesCount$.next(counts);
     saveJSON(STORAGE_WORKING, counts);
   }
   decrementSale(productId: string) {
+    this.loadWorkingTally();
     const counts = { ...this.salesCount$.value };
     if (!counts[productId]) return;
     counts[productId] = Math.max(0, counts[productId] - 1);
     this.salesCount$.next(counts);
     saveJSON(STORAGE_WORKING, counts);
   }
+  /** Clears the ENTIRE day's tally, submitted or not — for "start over",
+   *  not for normal use after a submit (which keeps counts visible). */
   resetSalesCounts() {
     this.salesCount$.next({});
+    this.submittedBaseline = {};
     saveJSON(STORAGE_WORKING, {});
+    saveJSON(STORAGE_SUBMITTED_BASELINE, {});
   }
   getTotalSalesCountToday() {
     return Object.values(this.salesCount$.value).reduce((sum, n) => sum + n, 0);
   }
+  /** How many tapped-but-not-yet-submitted items are waiting right now. */
+  getUnsubmittedCountToday() {
+    const counts = this.salesCount$.value;
+    return Object.keys(counts).reduce(
+      (sum, id) => sum + Math.max(0, (counts[id] || 0) - (this.submittedBaseline[id] || 0)),
+      0
+    );
+  }
 
   /**
-   * Registers the current tally as today's sales: writes one row per
-   * counted product to the SalesHistory sheet tab, deducts stock in the
-   * Products sheet, then clears the local working buffer. Returns null if
-   * there's nothing to submit, or if the write fails.
+   * Registers only what's been tapped SINCE the last submit as today's
+   * sales: writes one row per counted product to the SalesHistory sheet
+   * tab, deducts stock in the Products sheet, then raises the submitted
+   * baseline so those same taps are never sent twice — the displayed tally
+   * itself is left untouched (see class comment above). Returns null if
+   * there's nothing new to submit, or if the write fails.
    */
   async submitTodaysSales(): Promise<DailySalesRecord | null> {
+    this.loadWorkingTally();
     const counts = this.salesCount$.value;
-    const totalItems = Object.values(counts).reduce((sum, n) => sum + n, 0);
+    const deltas: Record<string, number> = {};
+    for (const id of Object.keys(counts)) {
+      const delta = (counts[id] || 0) - (this.submittedBaseline[id] || 0);
+      if (delta > 0) deltas[id] = delta;
+    }
+    const totalItems = Object.values(deltas).reduce((sum, n) => sum + n, 0);
     if (totalItems === 0) return null;
 
     const products = this.products$.value;
     const today = new Date().toISOString().slice(0, 10);
     const submittedAt = new Date().toISOString();
 
-    const rows = Object.entries(counts)
-      .filter(([, qty]) => qty > 0)
-      .map(([productId, qty]) => {
-        const product = products.find((p) => p.id === productId);
-        return {
-          id: `${today}-${productId}-${Date.now()}`,
-          date: today,
-          productId,
-          productName: product?.name || productId,
-          qty,
-          priceAtSale: product?.sellingPrice || 0,
-          costAtSale: product?.costPrice || 0,
-          submittedAt,
-        };
-      });
+    const rows = Object.entries(deltas).map(([productId, qty]) => {
+      const product = products.find((p) => p.id === productId);
+      return {
+        id: `${today}-${productId}-${Date.now()}`,
+        date: today,
+        productId,
+        productName: product?.name || productId,
+        qty,
+        priceAtSale: product?.sellingPrice || 0,
+        costAtSale: product?.costPrice || 0,
+        submittedAt,
+      };
+    });
     const totalRevenue = rows.reduce((sum, r) => sum + r.qty * r.priceAtSale, 0);
     const totalProfit = rows.reduce((sum, r) => sum + r.qty * (r.priceAtSale - r.costAtSale), 0);
 
@@ -367,12 +422,12 @@ export class DataService {
       return null;
     }
 
-    // Deduct sold quantities from stock. Sends the FULL updated product row
-    // (not just id + stockQty) because the sheet's "update" actions replace
-    // the entire row — sending a partial object would blank out the other
-    // columns.
-    const stockUpdates = Object.entries(counts)
-      .filter(([, qty]) => qty > 0)
+    // Deduct sold quantities from stock (only the NEW delta, not the whole
+    // day's tally, since earlier taps were already deducted on a prior
+    // submit). Sends the FULL updated product row (not just id + stockQty)
+    // because the sheet's "update" actions replace the entire row —
+    // sending a partial object would blank out the other columns.
+    const stockUpdates = Object.entries(deltas)
       .map(([productId, qty]) => {
         const product = products.find((p) => p.id === productId);
         if (!product) return null;
@@ -388,7 +443,10 @@ export class DataService {
       }
     }
 
-    this.resetSalesCounts();
+    // Raise the baseline to the current tally — NOT a reset — so the
+    // displayed counts stay exactly as they are.
+    this.submittedBaseline = { ...counts };
+    saveJSON(STORAGE_SUBMITTED_BASELINE, this.submittedBaseline);
     this.refreshSalesHistory();
     this.refreshProducts();
 

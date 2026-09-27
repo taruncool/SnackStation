@@ -78,7 +78,13 @@ export class SalesHistoryModal {
       <div class="ss-container" style="padding:10px;">
         <div class="ss-stat-card ss-card" style="margin-bottom:12px; padding:16px;">
           <div class="ss-stat-value" style="font-size:28px;">{{ totalCount }}</div>
-          <div class="ss-stat-label">Total items counted (not yet submitted)</div>
+          <div class="ss-stat-label">Total items counted today</div>
+          <div
+            *ngIf="unsubmittedCount > 0"
+            style="font-size:12px; color:var(--ion-color-secondary); font-weight:600; margin-top:4px;"
+          >
+            {{ unsubmittedCount }} not yet submitted
+          </div>
         </div>
 
         <ion-grid>
@@ -107,8 +113,11 @@ export class SalesHistoryModal {
                       style="width:44px; height:44px; border-radius:10px; object-fit:cover; margin-bottom:2px;"
                     />
                     <h3 style="margin:4px 0 2px; font-size:14px; font-weight:600;">{{ p.name }}</h3>
-                    <p style="margin:0 0 8px; font-size:12px; color:var(--ion-color-medium);">
+                    <p style="margin:0 0 2px; font-size:12px; color:var(--ion-color-medium);">
                       {{ p.category }}
+                    </p>
+                    <p style="margin:0 0 8px; font-size:13px; font-weight:600; color:var(--ion-color-primary);">
+                      ₹{{ p.sellingPrice }}
                     </p>
                     <div class="ss-tap-overlay">
                       <div class="ss-tap-zone" (click)="remove(p, $event)"></div>
@@ -149,11 +158,12 @@ export class SalesHistoryModal {
           expand="block"
           color="primary"
           style="margin:8px;"
-          [disabled]="totalCount === 0"
+          [disabled]="unsubmittedCount === 0 || submitting"
           (click)="submit()"
         >
-          <ion-icon slot="start" name="checkmark-done-outline"></ion-icon>
-          Submit Today's Sales ({{ totalCount }})
+          <ion-spinner *ngIf="submitting" name="dots" style="margin-right:8px;"></ion-spinner>
+          <ion-icon *ngIf="!submitting" slot="start" name="checkmark-done-outline"></ion-icon>
+          {{ submitting ? 'Submitting…' : 'Submit Today\'s Sales (' + unsubmittedCount + ')' }}
         </ion-button>
       </ion-toolbar>
     </ion-footer>
@@ -209,6 +219,7 @@ export class SalesCountPage {
   products: Product[] = [];
   counts: Record<string, number> = {};
   query = '';
+  submitting = false;
 
   constructor(
     private data: DataService,
@@ -230,6 +241,10 @@ export class SalesCountPage {
     return this.data.getTotalSalesCountToday();
   }
 
+  get unsubmittedCount() {
+    return this.data.getUnsubmittedCountToday();
+  }
+
   add(p: Product, ev?: Event) {
     ev?.stopPropagation();
     this.data.incrementSale(p.id);
@@ -242,9 +257,9 @@ export class SalesCountPage {
 
   async confirmReset() {
     const alert = await this.alertCtrl.create({
-      header: 'Clear uncounted tally?',
+      header: 'Clear today\'s tally?',
       message:
-        'This clears the current running count without saving it to sales history. This cannot be undone.',
+        'This clears the ENTIRE running count for today, including anything already submitted to sales history. This cannot be undone.',
       buttons: [
         { text: 'Cancel', role: 'cancel' },
         {
@@ -260,27 +275,32 @@ export class SalesCountPage {
   async submit() {
     const alert = await this.alertCtrl.create({
       header: "Submit today's sales?",
-      message: `This registers ${this.totalCount} counted item(s) to today's sales record and clears the tally so you can start counting the next batch.`,
+      message: `This registers ${this.unsubmittedCount} newly counted item(s) to today's sales record. Your counts stay visible here afterward — only what you tap next gets sent on your next submit.`,
       buttons: [
         { text: 'Cancel', role: 'cancel' },
         {
           text: 'Submit',
           handler: async () => {
-            const record = await this.data.submitTodaysSales();
-            if (record) {
-              const toast = await this.toastCtrl.create({
-                message: `Recorded ${record.totalItems} items for ${record.date} (₹${record.totalRevenue.toLocaleString()} total).`,
-                duration: 2500,
-                color: 'primary',
-              });
-              await toast.present();
-            } else {
-              const toast = await this.toastCtrl.create({
-                message: `Couldn't submit — check your connection or Google Sheets setup.`,
-                duration: 2500,
-                color: 'danger',
-              });
-              await toast.present();
+            this.submitting = true;
+            try {
+              const record = await this.data.submitTodaysSales();
+              if (record) {
+                const toast = await this.toastCtrl.create({
+                  message: `Recorded ${record.totalItems} items for ${record.date} (₹${record.totalRevenue.toLocaleString()} total).`,
+                  duration: 2500,
+                  color: 'primary',
+                });
+                await toast.present();
+              } else {
+                const toast = await this.toastCtrl.create({
+                  message: `Couldn't submit — check your connection or Google Sheets setup.`,
+                  duration: 2500,
+                  color: 'danger',
+                });
+                await toast.present();
+              }
+            } finally {
+              this.submitting = false;
             }
           },
         },
