@@ -52,7 +52,13 @@ function doPost(e) {
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
 
   if (action === 'add') {
-    sheet.appendRow(rowFromObject(headers, data));
+    var addRow = sheet.getLastRow() + 1;
+    var addRange = sheet.getRange(addRow, 1, 1, headers.length);
+    // Plain text BEFORE writing — same reasoning as setSheetData: stops
+    // Sheets from silently turning a date-like string into a real Date
+    // cell, which breaks the app's string-based date comparisons.
+    addRange.setNumberFormat('@');
+    addRange.setValues([rowFromObject(headers, data)]);
     return jsonResponse({ success: true });
   }
 
@@ -61,7 +67,9 @@ function doPost(e) {
       return rowFromObject(headers, item);
     });
     if (rows.length > 0) {
-      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length).setValues(rows);
+      var addManyRange = sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, headers.length);
+      addManyRange.setNumberFormat('@');
+      addManyRange.setValues(rows);
     }
     return jsonResponse({ success: true, count: rows.length });
   }
@@ -70,9 +78,9 @@ function doPost(e) {
     var idColUpdate = headers.indexOf('id') + 1;
     var rowIndexUpdate = findRowById(sheet, idColUpdate, data.id);
     if (rowIndexUpdate === -1) return jsonResponse({ error: 'Row not found' });
-    sheet
-      .getRange(rowIndexUpdate, 1, 1, headers.length)
-      .setValues([rowFromObject(headers, data)]);
+    var updateRange = sheet.getRange(rowIndexUpdate, 1, 1, headers.length);
+    updateRange.setNumberFormat('@');
+    updateRange.setValues([rowFromObject(headers, data)]);
     return jsonResponse({ success: true });
   }
 
@@ -83,9 +91,9 @@ function doPost(e) {
     for (var u = 0; u < itemsUpdateMany.length; u++) {
       var rowIndexMany = findRowById(sheet, idColUpdateMany, itemsUpdateMany[u].id);
       if (rowIndexMany === -1) continue;
-      sheet
-        .getRange(rowIndexMany, 1, 1, headers.length)
-        .setValues([rowFromObject(headers, itemsUpdateMany[u])]);
+      var updateManyRange = sheet.getRange(rowIndexMany, 1, 1, headers.length);
+      updateManyRange.setNumberFormat('@');
+      updateManyRange.setValues([rowFromObject(headers, itemsUpdateMany[u])]);
       updatedCount++;
     }
     return jsonResponse({ success: true, count: updatedCount });
@@ -121,13 +129,26 @@ function readSheet(sheetName) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
   if (!sheet || sheet.getLastRow() < 2) return [];
+  var tz = ss.getSpreadsheetTimeZone();
   var range = sheet.getDataRange().getValues();
   var headers = range[0];
   var rows = [];
   for (var i = 1; i < range.length; i++) {
     var obj = {};
     for (var j = 0; j < headers.length; j++) {
-      obj[headers[j]] = range[i][j];
+      var val = range[i][j];
+      if (val instanceof Date) {
+        // Defensive: normalizes any cell that's still a real Date object —
+        // e.g. rows written before the plain-text fix in setSheetData()/
+        // doPost() above — back into a plain string. Left as a Date, this
+        // would serialize as a UTC timestamp (JSON.stringify calls
+        // Date#toJSON) and break the app's string-based date comparisons.
+        // Midnight-local is treated as a plain calendar day; anything else
+        // keeps its time component.
+        var hasTime = val.getHours() !== 0 || val.getMinutes() !== 0 || val.getSeconds() !== 0;
+        val = Utilities.formatDate(val, tz, hasTime ? "yyyy-MM-dd'T'HH:mm:ss" : 'yyyy-MM-dd');
+      }
+      obj[headers[j]] = val;
     }
     rows.push(obj);
   }
@@ -338,7 +359,12 @@ function setSheetData(ss, name, headers, rows) {
   sheet.clear();
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
   if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+    var dataRange = sheet.getRange(2, 1, rows.length, headers.length);
+    // Force plain text BEFORE writing, so Sheets never "smart"-converts a
+    // date-like string (e.g. '2026-09-27') into a real Date cell — that
+    // conversion is what silently breaks date comparisons in the app.
+    dataRange.setNumberFormat('@');
+    dataRange.setValues(rows);
   }
   sheet.setFrozenRows(1);
 }
