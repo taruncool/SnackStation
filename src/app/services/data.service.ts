@@ -162,8 +162,16 @@ export class DataService {
     this.refreshSalesHistory();
   }
 
+  // Apps Script Web App GET responses are cacheable by the browser, so a
+  // page that only ever requests the exact same URL (?sheet=Products, say)
+  // can keep getting served a stale cached response after the underlying
+  // Sheet changes — a busy-cache query param forces every call to be
+  // treated as a fresh, uncached request.
   private getSheet<T>(sheet: string) {
-    return this.http.get<any[]>(`${environment.sheetsApiUrl}?sheet=${encodeURIComponent(sheet)}`);
+    const cacheBust = Date.now();
+    return this.http.get<any[]>(
+      `${environment.sheetsApiUrl}?sheet=${encodeURIComponent(sheet)}&_=${cacheBust}`
+    );
   }
 
   /** Apps Script Web Apps don't support CORS preflight, so POSTs are sent as
