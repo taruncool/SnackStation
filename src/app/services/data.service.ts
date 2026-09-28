@@ -178,6 +178,20 @@ export class DataService {
   private loadWorkingTally() {
     const today = new Date().toISOString().slice(0, 10);
     const storedDate = loadJSON<string | null>(STORAGE_WORKING_DATE, null);
+
+    // First run after upgrading from a version that didn't track the date
+    // yet: there's no stored date to compare against, but whatever tally
+    // already exists on this device is real — adopt it as today's and start
+    // tracking the date from here on, instead of wiping it.
+    if (storedDate === null) {
+      saveJSON(STORAGE_WORKING_DATE, today);
+      this.salesCount$.next(loadJSON<Record<string, number>>(STORAGE_WORKING, {}));
+      this.submittedBaseline = loadJSON<Record<string, number>>(STORAGE_SUBMITTED_BASELINE, {});
+      return;
+    }
+
+    // A genuinely different day than the one this tally was started on:
+    // roll over to a fresh, empty tally.
     if (storedDate !== today) {
       this.salesCount$.next({});
       this.submittedBaseline = {};
@@ -186,6 +200,7 @@ export class DataService {
       saveJSON(STORAGE_SUBMITTED_BASELINE, {});
       return;
     }
+
     this.salesCount$.next(loadJSON<Record<string, number>>(STORAGE_WORKING, {}));
     this.submittedBaseline = loadJSON<Record<string, number>>(STORAGE_SUBMITTED_BASELINE, {});
   }

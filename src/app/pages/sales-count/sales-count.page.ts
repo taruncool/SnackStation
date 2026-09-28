@@ -163,7 +163,7 @@ export class SalesHistoryModal {
         >
           <ion-spinner *ngIf="submitting" name="dots" style="margin-right:8px;"></ion-spinner>
           <ion-icon *ngIf="!submitting" slot="start" name="checkmark-done-outline"></ion-icon>
-          {{ submitting ? 'Submitting…' : 'Submit Today\'s Sales (' + unsubmittedCount + ')' }}
+          {{ submitButtonLabel }}
         </ion-button>
       </ion-toolbar>
     </ion-footer>
@@ -243,6 +243,10 @@ export class SalesCountPage {
 
   get unsubmittedCount() {
     return this.data.getUnsubmittedCountToday();
+  }
+
+  get submitButtonLabel() {
+    return this.submitting ? 'Submitting…' : `Submit Today's Sales (${this.unsubmittedCount})`;
   }
 
   add(p: Product, ev?: Event) {
