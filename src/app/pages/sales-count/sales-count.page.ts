@@ -1,7 +1,13 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { IonicModule, AlertController, ModalController, ToastController } from '@ionic/angular';
+import {
+  IonicModule,
+  AlertController,
+  LoadingController,
+  ModalController,
+  ToastController,
+} from '@ionic/angular';
 import { DailySalesRecord, DataService, Product } from '../../services/data.service';
 
 @Component({
@@ -124,23 +130,6 @@ export class SalesHistoryModal {
                       <div class="ss-tap-zone" (click)="add(p, $event)"></div>
                     </div>
                   </div>
-                  <div style="display:flex; align-items:center; justify-content:center; gap:10px;">
-                    <ion-button
-                      size="small"
-                      fill="clear"
-                      color="medium"
-                      (click)="remove(p, $event)"
-                      [disabled]="!counts[p.id]"
-                    >
-                      <ion-icon slot="icon-only" name="remove-circle-outline"></ion-icon>
-                    </ion-button>
-                    <span style="min-width:20px; font-weight:700; font-size:15px;">{{
-                      counts[p.id] || 0
-                    }}</span>
-                    <ion-button size="small" fill="clear" color="primary" (click)="add(p, $event)">
-                      <ion-icon slot="icon-only" name="add-circle"></ion-icon>
-                    </ion-button>
-                  </div>
                 </ion-card-content>
               </ion-card>
             </ion-col>
@@ -225,7 +214,8 @@ export class SalesCountPage {
     private data: DataService,
     private alertCtrl: AlertController,
     private modalCtrl: ModalController,
-    private toastCtrl: ToastController
+    private toastCtrl: ToastController,
+    private loadingCtrl: LoadingController
   ) {
     this.data.getProducts().subscribe((p) => (this.products = p.filter((x) => x.status === 'active')));
     this.data.getSalesCounts().subscribe((c) => (this.counts = c));
@@ -286,8 +276,15 @@ export class SalesCountPage {
           text: 'Submit',
           handler: async () => {
             this.submitting = true;
+            const loader = await this.loadingCtrl.create({
+              message: 'Submitting today\'s sales…',
+              spinner: 'crescent',
+              backdropDismiss: false,
+            });
+            await loader.present();
             try {
               const record = await this.data.submitTodaysSales();
+              await loader.dismiss();
               if (record) {
                 const toast = await this.toastCtrl.create({
                   message: `Recorded ${record.totalItems} items for ${record.date} (₹${record.totalRevenue.toLocaleString()} total).`,
@@ -303,6 +300,9 @@ export class SalesCountPage {
                 });
                 await toast.present();
               }
+            } catch (err) {
+              console.error('Submit failed', err);
+              await loader.dismiss().catch(() => {});
             } finally {
               this.submitting = false;
             }
