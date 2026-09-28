@@ -93,7 +93,18 @@ export class SalesHistoryModal {
           </div>
         </div>
 
-        <ion-grid>
+        <div *ngIf="productsStatus === 'loading'" class="ion-text-center" style="padding:40px 0;">
+          <ion-spinner name="crescent" color="primary"></ion-spinner>
+          <p style="color:var(--ion-color-medium); margin-top:12px;">Loading products…</p>
+        </div>
+        <div *ngIf="productsStatus === 'error'" class="ion-text-center" style="padding:40px 16px;">
+          <p style="color:var(--ion-color-danger); margin:0 0 12px;">
+            Couldn't load products — check your connection and try again.
+          </p>
+          <ion-button size="small" (click)="retryProducts()">Retry</ion-button>
+        </div>
+
+        <ion-grid *ngIf="productsStatus === 'loaded'">
           <ion-row>
             <ion-col size="6" size-md="4" size-lg="3" *ngFor="let p of filtered">
               <ion-card class="ss-card" style="position:relative;">
@@ -135,7 +146,11 @@ export class SalesHistoryModal {
             </ion-col>
           </ion-row>
         </ion-grid>
-        <p *ngIf="filtered.length === 0" class="ion-text-center" style="color:var(--ion-color-medium);">
+        <p
+          *ngIf="productsStatus === 'loaded' && filtered.length === 0"
+          class="ion-text-center"
+          style="color:var(--ion-color-medium);"
+        >
           No active products found
         </p>
       </div>
@@ -147,7 +162,7 @@ export class SalesHistoryModal {
           expand="block"
           color="primary"
           style="margin:8px;"
-          [disabled]="unsubmittedCount === 0 || submitting"
+          [disabled]="unsubmittedCount === 0 || submitting || productsStatus !== 'loaded'"
           (click)="submit()"
         >
           <ion-spinner *ngIf="submitting" name="dots" style="margin-right:8px;"></ion-spinner>
@@ -209,6 +224,8 @@ export class SalesCountPage {
   counts: Record<string, number> = {};
   query = '';
   submitting = false;
+  productsStatus: 'loading' | 'loaded' | 'error' = 'loading';
+  private reduceAlertOpen = false;
 
   constructor(
     private data: DataService,
@@ -219,6 +236,11 @@ export class SalesCountPage {
   ) {
     this.data.getProducts().subscribe((p) => (this.products = p.filter((x) => x.status === 'active')));
     this.data.getSalesCounts().subscribe((c) => (this.counts = c));
+    this.data.getProductsStatus().subscribe((st) => (this.productsStatus = st));
+  }
+
+  retryProducts() {
+    this.data.refreshProducts();
   }
 
   get filtered() {
@@ -244,16 +266,69 @@ export class SalesCountPage {
     this.data.incrementSale(p.id);
   }
 
-  remove(p: Product, ev?: Event) {
+  async remove(p: Product, ev?: Event) {
     ev?.stopPropagation();
+    const current = this.counts[p.id] || 0;
+    if (!current) return;
+    // Going below what's already been submitted means changing a saved
+    // sale, not just fixing a mis-tap — make that an explicit choice.
+    if (current <= this.data.getSubmittedCount(p.id)) {
+      await this.confirmReduceSubmitted(p);
+      return;
+    }
     this.data.decrementSale(p.id);
+  }
+
+  private async confirmReduceSubmitted(p: Product) {
+    if (this.reduceAlertOpen) return;
+    this.reduceAlertOpen = true;
+    const alert = await this.alertCtrl.create({
+      header: "Reduce today's sale?",
+      message: `You have already submitted this product count under today's sale. Do you really want to reduce the count of ${p.name} from today's sale?`,
+      buttons: [
+        { text: 'Cancel', role: 'cancel' },
+        {
+          text: 'Yes, reduce',
+          role: 'destructive',
+          handler: () => {
+            this.applyReduction(p);
+          },
+        },
+      ],
+    });
+    alert.onDidDismiss().then(() => (this.reduceAlertOpen = false));
+    await alert.present();
+  }
+
+  private async applyReduction(p: Product) {
+    const loader = await this.loadingCtrl.create({
+      message: "Updating today's sale…",
+      spinner: 'crescent',
+      backdropDismiss: false,
+    });
+    await loader.present();
+    let ok = false;
+    try {
+      ok = await this.data.reduceSubmittedSale(p.id);
+    } catch (err) {
+      console.error('Reducing submitted sale failed', err);
+    }
+    await loader.dismiss();
+    const toast = await this.toastCtrl.create({
+      message: ok
+        ? `Reduced 1 ${p.name} from today's sale.`
+        : `Couldn't update today's sale — check your connection and try again.`,
+      duration: 2500,
+      color: ok ? 'primary' : 'danger',
+    });
+    await toast.present();
   }
 
   async confirmReset() {
     const alert = await this.alertCtrl.create({
-      header: 'Clear today\'s tally?',
+      header: 'Clear the counter?',
       message:
-        'This clears the ENTIRE running count for today, including anything already submitted to sales history. This cannot be undone.',
+        'This only resets the counter on this screen to 0. Sales you already submitted stay in sales history.',
       buttons: [
         { text: 'Cancel', role: 'cancel' },
         {

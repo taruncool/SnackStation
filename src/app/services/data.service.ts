@@ -143,6 +143,10 @@ function coerce<T extends Record<string, any>>(row: any, numberKeys: string[], b
 @Injectable({ providedIn: 'root' })
 export class DataService {
   private products$ = new BehaviorSubject<Product[]>([]);
+  /** 'loading' until the first Products fetch finishes, so pages can show a
+   *  loader instead of a misleading empty state. A later failed refresh keeps
+   *  the last good data and stays 'loaded'. */
+  private productsStatus$ = new BehaviorSubject<'loading' | 'loaded' | 'error'>('loading');
   private categories$ = new BehaviorSubject<Category[]>([]);
   private customers$ = new BehaviorSubject<Customer[]>([]);
   private offers$ = new BehaviorSubject<Offer[]>([]);
@@ -231,13 +235,22 @@ export class DataService {
 
   // ---- Products ----
   refreshProducts() {
+    if (this.productsStatus$.value !== 'loaded') this.productsStatus$.next('loading');
     this.getSheet<Product>('Products').subscribe({
-      next: (rows) =>
+      next: (rows) => {
         this.products$.next(
           rows.map((r) => coerce<Product>(r, ['costPrice', 'sellingPrice', 'gst', 'stockQty', 'minStock']))
-        ),
-      error: (err) => console.error('Failed to load Products from Google Sheets', err),
+        );
+        this.productsStatus$.next('loaded');
+      },
+      error: (err) => {
+        console.error('Failed to load Products from Google Sheets', err);
+        if (this.productsStatus$.value !== 'loaded') this.productsStatus$.next('error');
+      },
     });
+  }
+  getProductsStatus() {
+    return this.productsStatus$.asObservable();
   }
   getProducts() {
     return this.products$.asObservable();
@@ -430,12 +443,7 @@ export class DataService {
     const totalRevenue = rows.reduce((sum, r) => sum + r.qty * r.priceAtSale, 0);
     const totalProfit = rows.reduce((sum, r) => sum + r.qty * (r.priceAtSale - r.costAtSale), 0);
 
-    try {
-      await firstValueFrom(this.postSheet('SalesHistory', 'addMany', rows));
-    } catch (err) {
-      console.error('Failed to submit sales to Google Sheets', err);
-      return null;
-    }
+    if (!(await this.postRowsConfirmed('SalesHistory', rows))) return null;
 
     // Deduct sold quantities from stock (only the NEW delta, not the whole
     // day's tally, since earlier taps were already deducted on a prior
@@ -475,6 +483,89 @@ export class DataService {
     };
   }
 
+  /**
+   * POSTs rows to a sheet and reports whether they were really saved. A
+   * browser-side error on an Apps Script POST does NOT prove the write
+   * failed (the script can finish the write and the response still not make
+   * it back), so on any error we re-read the sheet and look for the exact
+   * row ids before giving up. This also stops a retry from writing the same
+   * sale twice.
+   */
+  private async postRowsConfirmed(sheet: string, rows: { id: string }[]): Promise<boolean> {
+    try {
+      await firstValueFrom(this.postSheet(sheet, 'addMany', rows));
+      return true;
+    } catch (err: any) {
+      console.error(
+        `POST to ${sheet} reported an error (status ${err?.status}) — checking whether it saved anyway`,
+        err
+      );
+    }
+    const ids = rows.map((r) => r.id);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 800 : 1500));
+      try {
+        const existing = await firstValueFrom(this.getSheet<any>(sheet));
+        const have = new Set(existing.map((r) => String(r.id)));
+        if (ids.every((id) => have.has(id))) return true;
+      } catch (err) {
+        console.error(`Couldn't re-read ${sheet} to verify the write`, err);
+      }
+    }
+    return false;
+  }
+
+  /** How much of a product's count has already been submitted today. */
+  getSubmittedCount(productId: string) {
+    return this.submittedBaseline[productId] || 0;
+  }
+
+  /**
+   * Takes ONE unit of an already-submitted product back out of today's
+   * sale. SalesHistory is append-only, so this writes a correcting row with
+   * qty -1 (same price/cost) rather than deleting anything — revenue, profit
+   * and items sold net out, and the audit trail stays visible in the Sheet.
+   * The unit is put back into stock and the on-screen count drops by one.
+   * Returns false if nothing could be reduced or the write didn't land.
+   */
+  async reduceSubmittedSale(productId: string): Promise<boolean> {
+    this.loadWorkingTally();
+    const current = this.salesCount$.value[productId] || 0;
+    const submitted = this.submittedBaseline[productId] || 0;
+    const product = this.products$.value.find((p) => p.id === productId);
+    if (!product || current <= 0 || submitted <= 0) return false;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const row = {
+      id: `${today}-${productId}-adj-${Date.now()}`,
+      date: today,
+      productId,
+      productName: product.name,
+      qty: -1,
+      priceAtSale: product.sellingPrice,
+      costAtSale: product.costPrice,
+      submittedAt: new Date().toISOString(),
+    };
+    if (!(await this.postRowsConfirmed('SalesHistory', [row]))) return false;
+
+    try {
+      await firstValueFrom(
+        this.postSheet('Products', 'update', { ...product, stockQty: product.stockQty + 1 })
+      );
+    } catch (err) {
+      console.error('Sale was reduced, but putting the unit back in stock failed', err);
+    }
+
+    const counts = { ...this.salesCount$.value, [productId]: current - 1 };
+    this.salesCount$.next(counts);
+    saveJSON(STORAGE_WORKING, counts);
+    this.submittedBaseline = { ...this.submittedBaseline, [productId]: submitted - 1 };
+    saveJSON(STORAGE_SUBMITTED_BASELINE, this.submittedBaseline);
+    this.refreshSalesHistory();
+    this.refreshProducts();
+    return true;
+  }
+
   refreshSalesHistory() {
     this.getSheet<any>('SalesHistory').subscribe({
       next: (rows) => {
@@ -505,6 +596,8 @@ export class DataService {
             grouped[date].submittedAt = r.submittedAt;
           }
         }
+        // Correcting rows (qty -1) can net a product out to 0 for the day.
+        for (const g of Object.values(grouped)) g.items = g.items.filter((i) => i.qty > 0);
         const list = Object.values(grouped).sort((a, b) => (a.date < b.date ? 1 : -1));
         this.salesHistory$.next(list);
       },
