@@ -2,6 +2,7 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IonicModule, ModalController } from '@ionic/angular';
+import { DataStateComponent } from '../../shared/data-state.component';
 import { DataService, Product } from '../../services/data.service';
 
 @Component({
@@ -97,7 +98,7 @@ export class ProductFormModal {
 @Component({
   selector: 'app-products',
   standalone: true,
-  imports: [CommonModule, FormsModule, IonicModule],
+  imports: [CommonModule, FormsModule, IonicModule, DataStateComponent],
   template: `
     <ion-header>
       <ion-toolbar class="ss-toolbar">
@@ -163,9 +164,13 @@ export class ProductFormModal {
             </ion-col>
           </ion-row>
         </ion-grid>
-        <p *ngIf="filtered.length === 0" class="ion-text-center" style="color:var(--ion-color-medium);">
-          No products found
-        </p>
+        <app-data-state
+          [status]="status"
+          [empty]="filtered.length === 0"
+          emptyText="No products found"
+          loadingText="Loading products…"
+          (retry)="data.refreshProducts()"
+        ></app-data-state>
       </div>
     </ion-content>
   `,
@@ -199,8 +204,11 @@ export class ProductsPage {
   categoryOptions: string[] = ['All'];
   selectedCategory = 'All';
 
-  constructor(private data: DataService, private modalCtrl: ModalController) {
+  status: 'loading' | 'loaded' | 'error' = 'loading';
+
+  constructor(public data: DataService, private modalCtrl: ModalController) {
     this.data.getProducts().subscribe((p) => (this.products = p));
+    this.data.getProductsStatus().subscribe((st) => (this.status = st));
     this.data.getCategories().subscribe((cats) => {
       this.categoryOptions = ['All', ...cats.map((c) => c.name)];
     });

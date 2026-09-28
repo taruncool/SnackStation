@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, firstValueFrom } from 'rxjs';
+import { BehaviorSubject, firstValueFrom, retry } from 'rxjs';
 import { environment } from '../../environments/environment';
 import dashboardData from '../data/dashboard.json';
 
@@ -147,6 +147,9 @@ export class DataService {
    *  loader instead of a misleading empty state. A later failed refresh keeps
    *  the last good data and stays 'loaded'. */
   private productsStatus$ = new BehaviorSubject<'loading' | 'loaded' | 'error'>('loading');
+  private customersStatus$ = new BehaviorSubject<'loading' | 'loaded' | 'error'>('loading');
+  private expensesStatus$ = new BehaviorSubject<'loading' | 'loaded' | 'error'>('loading');
+  private salesHistoryStatus$ = new BehaviorSubject<'loading' | 'loaded' | 'error'>('loading');
   private categories$ = new BehaviorSubject<Category[]>([]);
   private customers$ = new BehaviorSubject<Customer[]>([]);
   private offers$ = new BehaviorSubject<Offer[]>([]);
@@ -216,9 +219,13 @@ export class DataService {
   // treated as a fresh, uncached request.
   private getSheet<T>(sheet: string) {
     const cacheBust = Date.now();
-    return this.http.get<any[]>(
-      `${environment.sheetsApiUrl}?sheet=${encodeURIComponent(sheet)}&_=${cacheBust}`
-    );
+    // Reads are safe to repeat, and Apps Script occasionally fails a request
+    // (cold start, transient error page) that works a moment later — retry
+    // quietly, so the page keeps showing its loader instead of an empty/error
+    // state. (Writes are never auto-retried: see postRowsConfirmed.)
+    return this.http
+      .get<any[]>(`${environment.sheetsApiUrl}?sheet=${encodeURIComponent(sheet)}&_=${cacheBust}`)
+      .pipe(retry({ count: 2, delay: 1200 }));
   }
 
   /** Apps Script Web Apps don't support CORS preflight, so POSTs are sent as
@@ -293,11 +300,20 @@ export class DataService {
 
   // ---- Customers ----
   refreshCustomers() {
+    if (this.customersStatus$.value !== 'loaded') this.customersStatus$.next('loading');
     this.getSheet<Customer>('Customers').subscribe({
-      next: (rows) =>
-        this.customers$.next(rows.map((r) => coerce<Customer>(r, ['loyaltyPoints', 'outstandingAmount', 'totalOrders']))),
-      error: (err) => console.error('Failed to load Customers from Google Sheets', err),
+      next: (rows) => {
+        this.customers$.next(rows.map((r) => coerce<Customer>(r, ['loyaltyPoints', 'outstandingAmount', 'totalOrders'])));
+        this.customersStatus$.next('loaded');
+      },
+      error: (err) => {
+        console.error('Failed to load Customers from Google Sheets', err);
+        if (this.customersStatus$.value !== 'loaded') this.customersStatus$.next('error');
+      },
     });
+  }
+  getCustomersStatus() {
+    return this.customersStatus$.asObservable();
   }
   getCustomers() {
     return this.customers$.asObservable();
@@ -322,11 +338,20 @@ export class DataService {
 
   // ---- Expenses / Inventory spend (raw material, equipment, utilities) ----
   refreshExpenses() {
+    if (this.expensesStatus$.value !== 'loaded') this.expensesStatus$.next('loading');
     this.getSheet<Expense>('Expenses').subscribe({
-      next: (rows) =>
-        this.expenses$.next(rows.map((r) => coerce<Expense>(r, ['amount', 'usefulLifeMonths']))),
-      error: (err) => console.error('Failed to load Expenses from Google Sheets', err),
+      next: (rows) => {
+        this.expenses$.next(rows.map((r) => coerce<Expense>(r, ['amount', 'usefulLifeMonths'])));
+        this.expensesStatus$.next('loaded');
+      },
+      error: (err) => {
+        console.error('Failed to load Expenses from Google Sheets', err);
+        if (this.expensesStatus$.value !== 'loaded') this.expensesStatus$.next('error');
+      },
     });
+  }
+  getExpensesStatus() {
+    return this.expensesStatus$.asObservable();
   }
   getExpenses() {
     return this.expenses$.asObservable();
@@ -493,7 +518,11 @@ export class DataService {
    */
   private async postRowsConfirmed(sheet: string, rows: { id: string }[]): Promise<boolean> {
     try {
-      await firstValueFrom(this.postSheet(sheet, 'addMany', rows));
+      const res = await firstValueFrom(this.postSheet(sheet, 'addMany', rows));
+      if (res?.error) {
+        console.error(`Apps Script rejected the ${sheet} write:`, res.error);
+        return false;
+      }
       return true;
     } catch (err: any) {
       console.error(
@@ -567,6 +596,7 @@ export class DataService {
   }
 
   refreshSalesHistory() {
+    if (this.salesHistoryStatus$.value !== 'loaded') this.salesHistoryStatus$.next('loading');
     this.getSheet<any>('SalesHistory').subscribe({
       next: (rows) => {
         const grouped: Record<string, DailySalesRecord> = {};
@@ -600,9 +630,16 @@ export class DataService {
         for (const g of Object.values(grouped)) g.items = g.items.filter((i) => i.qty > 0);
         const list = Object.values(grouped).sort((a, b) => (a.date < b.date ? 1 : -1));
         this.salesHistory$.next(list);
+        this.salesHistoryStatus$.next('loaded');
       },
-      error: (err) => console.error('Failed to load SalesHistory from Google Sheets', err),
+      error: (err) => {
+        console.error('Failed to load SalesHistory from Google Sheets', err);
+        if (this.salesHistoryStatus$.value !== 'loaded') this.salesHistoryStatus$.next('error');
+      },
     });
+  }
+  getSalesHistoryStatus() {
+    return this.salesHistoryStatus$.asObservable();
   }
   getSalesHistory() {
     return this.salesHistory$.asObservable();

@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { IonicModule, ToastController } from '@ionic/angular';
+import { combineLatest } from 'rxjs';
 import { DataService, Offer } from '../../services/data.service';
 
 @Component({
@@ -35,7 +36,10 @@ import { DataService, Offer } from '../../services/data.service';
             </ion-select>
           </ion-card-header>
           <ion-card-content>
-            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
+            <p *ngIf="loading" style="display:flex; align-items:center; gap:8px; color:var(--ion-color-medium); margin:0 0 12px; font-size:13px;">
+              <ion-spinner name="dots" color="primary"></ion-spinner> Loading sales and expenses…
+            </p>
+            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;" [style.opacity]="loading ? 0.4 : 1">
               <div class="ss-report-stat">
                 <div class="ss-report-stat-value">₹{{ yearlySummary.revenue | number }}</div>
                 <div class="ss-report-stat-label">Yearly Revenue</div>
@@ -179,7 +183,12 @@ export class ReportsPage {
   monthlySummary = this.data.getMonthlySummary(this.selectedYear);
   yearlySummary = this.data.getYearlySummary(this.selectedYear);
 
+  loading = true;
+
   constructor(private data: DataService, private toastCtrl: ToastController) {
+    combineLatest([this.data.getSalesHistoryStatus(), this.data.getExpensesStatus()]).subscribe(
+      ([h, e]) => (this.loading = h === 'loading' || e === 'loading')
+    );
     this.data.getOffers().subscribe((o) => (this.offers = o));
     this.data.getExpenses().subscribe(() => this.recompute());
     this.data.getSalesHistory().subscribe(() => this.recompute());

@@ -8,12 +8,13 @@ import {
   ModalController,
   ToastController,
 } from '@ionic/angular';
+import { DataStateComponent } from '../../shared/data-state.component';
 import { DailySalesRecord, DataService, Product } from '../../services/data.service';
 
 @Component({
   selector: 'app-sales-history-modal',
   standalone: true,
-  imports: [CommonModule, IonicModule],
+  imports: [CommonModule, IonicModule, DataStateComponent],
   template: `
     <ion-header>
       <ion-toolbar class="ss-toolbar">
@@ -38,16 +39,22 @@ import { DailySalesRecord, DataService, Product } from '../../services/data.serv
           </ion-label>
         </ion-item>
       </ion-list>
-      <p *ngIf="history.length === 0" class="ion-text-center" style="color:var(--ion-color-medium); margin-top:40px;">
-        No sales submitted yet. Count today's sales and tap "Submit Today's Sales" to register them here.
-      </p>
+      <app-data-state
+        [status]="status"
+        [empty]="history.length === 0"
+        emptyText="No sales submitted yet. Count today's sales and tap &quot;Submit Today's Sales&quot; to register them here."
+        loadingText="Loading sales history…"
+        (retry)="data.refreshSalesHistory()"
+      ></app-data-state>
     </ion-content>
   `,
 })
 export class SalesHistoryModal {
   history: DailySalesRecord[] = [];
-  constructor(private modalCtrl: ModalController, private data: DataService) {
+  status: 'loading' | 'loaded' | 'error' = 'loading';
+  constructor(private modalCtrl: ModalController, public data: DataService) {
     this.data.getSalesHistory().subscribe((h) => (this.history = h));
+    this.data.getSalesHistoryStatus().subscribe((st) => (this.status = st));
     this.data.refreshSalesHistory();
   }
   dismiss() {

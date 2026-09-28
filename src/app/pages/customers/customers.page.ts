@@ -2,6 +2,7 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { IonicModule, ModalController } from '@ionic/angular';
+import { DataStateComponent } from '../../shared/data-state.component';
 import { Customer, DataService } from '../../services/data.service';
 
 @Component({
@@ -56,7 +57,7 @@ export class CustomerFormModal {
 @Component({
   selector: 'app-customers',
   standalone: true,
-  imports: [CommonModule, FormsModule, IonicModule],
+  imports: [CommonModule, FormsModule, IonicModule, DataStateComponent],
   template: `
     <ion-header>
       <ion-toolbar class="ss-toolbar">
@@ -91,9 +92,13 @@ export class CustomerFormModal {
             </ion-badge>
           </ion-item>
         </ion-list>
-        <p *ngIf="filtered.length === 0" class="ion-text-center" style="color:var(--ion-color-medium);">
-          No customers found
-        </p>
+        <app-data-state
+          [status]="status"
+          [empty]="filtered.length === 0"
+          emptyText="No customers found"
+          loadingText="Loading customers…"
+          (retry)="data.refreshCustomers()"
+        ></app-data-state>
       </div>
     </ion-content>
   `,
@@ -102,8 +107,11 @@ export class CustomersPage {
   customers: Customer[] = [];
   query = '';
 
-  constructor(private data: DataService, private modalCtrl: ModalController) {
+  status: 'loading' | 'loaded' | 'error' = 'loading';
+
+  constructor(public data: DataService, private modalCtrl: ModalController) {
     this.data.getCustomers().subscribe((c) => (this.customers = c));
+    this.data.getCustomersStatus().subscribe((st) => (this.status = st));
   }
 
   get filtered() {

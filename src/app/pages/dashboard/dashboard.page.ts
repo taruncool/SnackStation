@@ -3,12 +3,13 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { IonicModule } from '@ionic/angular';
+import { DataStateComponent } from '../../shared/data-state.component';
 import { DataService, Product, DailySalesRecord } from '../../services/data.service';
 
 @Component({
   selector: 'app-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, IonicModule],
+  imports: [CommonModule, FormsModule, IonicModule, DataStateComponent],
   template: `
     <ion-header>
       <ion-toolbar class="ss-toolbar">
@@ -33,7 +34,7 @@ import { DataService, Product, DailySalesRecord } from '../../services/data.serv
           <ion-row>
             <ion-col size="6" size-md="3">
               <div class="ss-stat-card ss-card">
-                <div class="ss-stat-value">₹{{ revenue | number }}</div>
+                <div class="ss-stat-value">{{ historyStatus === 'loaded' ? '₹' + (revenue | number) : '…' }}</div>
                 <div class="ss-stat-label">Revenue ({{ rangeLabel() }})<span class="ss-live-dot" title="Live from submitted sales"></span></div>
               </div>
             </ion-col>
@@ -46,7 +47,7 @@ import { DataService, Product, DailySalesRecord } from '../../services/data.serv
             <ion-col size="6" size-md="3">
               <div class="ss-stat-card ss-card" (click)="goToSalesCount()" style="cursor:pointer;">
                 <div class="ss-stat-value">
-                  {{ itemsSold }}
+                  {{ historyStatus === 'loaded' ? itemsSold : '…' }}
                   <ion-badge
                     *ngIf="range === 'daily' && unsubmittedCount > 0"
                     color="secondary"
@@ -62,7 +63,7 @@ import { DataService, Product, DailySalesRecord } from '../../services/data.serv
             </ion-col>
             <ion-col size="6" size-md="3">
               <div class="ss-stat-card ss-card">
-                <div class="ss-stat-value">₹{{ profit | number }}</div>
+                <div class="ss-stat-value">{{ historyStatus === 'loaded' ? '₹' + (profit | number) : '…' }}</div>
                 <div class="ss-stat-label">Profit ({{ rangeLabel() }})<span class="ss-live-dot" title="Live from submitted sales"></span></div>
               </div>
             </ion-col>
@@ -106,9 +107,13 @@ import { DataService, Product, DailySalesRecord } from '../../services/data.serv
                     <ion-label>{{ p.name }}</ion-label>
                     <ion-note slot="end">{{ p.unitsSold }} sold</ion-note>
                   </ion-item>
-                  <ion-item *ngIf="topSelling.length === 0">
-                    <ion-label color="medium">No sales submitted for {{ rangeLabel() | lowercase }} yet</ion-label>
-                  </ion-item>
+                  <app-data-state
+                    [status]="historyStatus"
+                    [empty]="topSelling.length === 0"
+                    [emptyText]="'No sales submitted for ' + (rangeLabel() | lowercase) + ' yet'"
+                    loadingText="Loading sales…"
+                    (retry)="data.refreshSalesHistory()"
+                  ></app-data-state>
                 </ion-list>
               </ion-card>
             </ion-col>
@@ -208,7 +213,10 @@ export class DashboardPage {
   private allProducts: Product[] = [];
   private salesHistory: DailySalesRecord[] = [];
 
-  constructor(private data: DataService, private router: Router) {
+  historyStatus: 'loading' | 'loaded' | 'error' = 'loading';
+
+  constructor(public data: DataService, private router: Router) {
+    this.data.getSalesHistoryStatus().subscribe((st) => (this.historyStatus = st));
     this.data.getProducts().subscribe((products) => {
       this.allProducts = products;
       this.lowStock = products.filter((p) => p.stockQty <= p.minStock);

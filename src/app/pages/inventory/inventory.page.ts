@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { IonicModule, ModalController, AlertController } from '@ionic/angular';
+import { DataStateComponent } from '../../shared/data-state.component';
 import { DataService, Expense } from '../../services/data.service';
 
 const EXPENSE_CATEGORIES: Expense['category'][] = [
@@ -132,7 +133,7 @@ export class ExpenseFormModal {
 @Component({
   selector: 'app-inventory',
   standalone: true,
-  imports: [CommonModule, FormsModule, IonicModule, RouterLink],
+  imports: [CommonModule, FormsModule, IonicModule, RouterLink, DataStateComponent],
   template: `
     <ion-header>
       <ion-toolbar class="ss-toolbar">
@@ -203,9 +204,13 @@ export class ExpenseFormModal {
                 ></div>
               </div>
             </div>
-            <p *ngIf="categoryBreakdown.length === 0" class="ion-text-center" style="color:var(--ion-color-medium); margin:0;">
-              No expenses logged yet.
-            </p>
+            <app-data-state
+              [status]="status"
+              [empty]="categoryBreakdown.length === 0"
+              emptyText="No expenses logged yet."
+              loadingText="Loading expenses…"
+              (retry)="data.refreshExpenses()"
+            ></app-data-state>
           </ion-card-content>
         </ion-card>
 
@@ -242,7 +247,11 @@ export class ExpenseFormModal {
               </div>
             </ion-item>
           </ion-list>
-          <p *ngIf="filtered.length === 0" class="ion-text-center" style="color:var(--ion-color-medium); padding:16px;">
+          <p
+            *ngIf="status === 'loaded' && filtered.length === 0"
+            class="ion-text-center"
+            style="color:var(--ion-color-medium); padding:16px;"
+          >
             No expenses found.
           </p>
         </ion-card>
@@ -296,18 +305,20 @@ export class ExpenseFormModal {
 })
 export class InventoryPage {
   expenses: Expense[] = [];
+  status: 'loading' | 'loaded' | 'error' = 'loading';
   query = '';
   categoryOptions: string[] = ['All', ...EXPENSE_CATEGORIES];
   selectedCategory = 'All';
 
   constructor(
-    private data: DataService,
+    public data: DataService,
     private modalCtrl: ModalController,
     private alertCtrl: AlertController
   ) {
     this.data.getExpenses().subscribe((e) => {
       this.expenses = [...e].sort((a, b) => (a.date < b.date ? 1 : -1));
     });
+    this.data.getExpensesStatus().subscribe((st) => (this.status = st));
   }
 
   get filtered() {
