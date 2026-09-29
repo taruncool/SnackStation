@@ -531,8 +531,14 @@ export class DataService {
       );
     }
     const ids = rows.map((r) => r.id);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 800 : 1500));
+    // Apps Script Web Apps can take several seconds — occasionally 10-20s on
+    // a cold start — to actually finish a write, well after the browser has
+    // already reported an error. Poll for a while before concluding it truly
+    // failed; giving up too early was causing false "couldn't submit"
+    // reports on writes that went through moments later.
+    const delays = [500, 1500, 2500, 4000, 5000, 6000, 6000];
+    for (const delay of delays) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
       try {
         const existing = await firstValueFrom(this.getSheet<any>(sheet));
         const have = new Set(existing.map((r) => String(r.id)));

@@ -314,12 +314,16 @@ export class SalesCountPage {
       backdropDismiss: false,
     });
     await loader.present();
+    const slowNotice = setTimeout(() => {
+      loader.message = 'Still working — confirming with Google Sheets… this can take a bit on a slow connection.';
+    }, 6000);
     let ok = false;
     try {
       ok = await this.data.reduceSubmittedSale(p.id);
     } catch (err) {
       console.error('Reducing submitted sale failed', err);
     }
+    clearTimeout(slowNotice);
     await loader.dismiss();
     const toast = await this.toastCtrl.create({
       message: ok
@@ -364,8 +368,12 @@ export class SalesCountPage {
               backdropDismiss: false,
             });
             await loader.present();
+            const slowNotice = setTimeout(() => {
+              loader.message = 'Still working — confirming with Google Sheets… this can take a bit on a slow connection.';
+            }, 6000);
             try {
               const record = await this.data.submitTodaysSales();
+              clearTimeout(slowNotice);
               await loader.dismiss();
               if (record) {
                 const toast = await this.toastCtrl.create({
@@ -383,6 +391,7 @@ export class SalesCountPage {
                 await toast.present();
               }
             } catch (err) {
+              clearTimeout(slowNotice);
               console.error('Submit failed', err);
               await loader.dismiss().catch(() => {});
             } finally {
