@@ -7,6 +7,7 @@
  * Endpoints (after deploying as a Web App):
  *   GET  {url}?sheet=Products              -> all rows in the "Products" tab as JSON
  *   POST {url}  { sheet, action, data }    -> action: "add" | "addMany" | "update" | "updateMany" | "delete"
+ *   POST {url}  { action: "login", data: { pin } } -> { success, user } checked against the Users tab
  *
  * Every sheet/tab must have a header row. Rows are matched for update/delete
  * by a column named "id".
@@ -28,12 +29,27 @@ function onOpen() {
 
 // Header rows for tabs doPost() may create on the fly (see doPost).
 var AUTO_CREATE_HEADERS = {
-  Bills: ['id', 'date', 'createdAt', 'customerName', 'customerPhone', 'items', 'itemCount', 'subtotal', 'discountPercent', 'discount', 'total', 'paymentMethod'],
+  Billing: [
+    'id', 'date', 'createdAt', 'customerId', 'customerName', 'customerPhone', 'itemsSummary', 'items',
+    'itemCount', 'subtotal', 'discountPercent', 'discount', 'total', 'paymentMethod', 'billedBy',
+  ],
 };
+
+// Login users. Never returned by doGet (that would expose every PIN to
+// anyone with the web app URL) — the app checks a PIN with the "login"
+// action instead, which only answers for the PIN it was given.
+var USERS_SHEET = 'Users';
+var USERS_HEADERS = ['id', 'name', 'role', 'pin', 'active'];
+var DEMO_USERS = [
+  ['U001', 'Admin', 'admin', '1234', true],
+  ['U002', 'Staff', 'staff', '1111', true],
+  ['U003', 'Cashier', 'cashier', '0000', true],
+];
 
 function doGet(e) {
   var sheetName = e.parameter.sheet;
   if (!sheetName) return jsonResponse({ error: 'Missing sheet parameter' });
+  if (sheetName === USERS_SHEET) return jsonResponse({ error: 'Not available' });
   return jsonResponse(readSheet(sheetName));
 }
 
@@ -48,11 +64,14 @@ function doPost(e) {
   var sheetName = body.sheet;
   var action = body.action;
   var data = body.data;
+  if (action === 'login') return jsonResponse(login(data));
+  // Users are only managed in the Sheet itself, never written by the app.
+  if (sheetName === USERS_SHEET) return jsonResponse({ error: 'Not available' });
   if (!sheetName || !action) return jsonResponse({ error: 'Missing sheet or action' });
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
-  // Tabs added in later app versions (e.g. Bills) are created on first
+  // Tabs added in later app versions (e.g. Billing) are created on first
   // write, so an existing Sheet doesn't need re-seeding to get them.
   if (!sheet && AUTO_CREATE_HEADERS[sheetName]) {
     sheet = ss.insertSheet(sheetName);
@@ -62,8 +81,8 @@ function doPost(e) {
   if (!sheet) return jsonResponse({ error: 'Sheet not found: ' + sheetName });
 
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  // A tab created by an older version may lack newer columns (e.g. Bills'
-  // discountPercent) — append them so those values aren't silently dropped.
+  // A tab created by an older version may lack newer columns (e.g.
+  // Billing's customerId) — append them so those values aren't silently dropped.
   var wanted = AUTO_CREATE_HEADERS[sheetName] || [];
   var missing = wanted.filter(function (h) { return headers.indexOf(h) === -1; });
   if (missing.length > 0) {
@@ -128,6 +147,36 @@ function doPost(e) {
   }
 
   return jsonResponse({ error: 'Unknown action: ' + action });
+}
+
+/** Checks a PIN against the Users tab (created with DEMO_USERS the first
+ *  time). Returns the matching active user without the PIN. */
+function login(data) {
+  var pin = String((data && data.pin) || '').trim();
+  if (!/^\d{4}$/.test(pin)) return { error: 'Enter your 4-digit PIN' };
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(USERS_SHEET);
+  if (!sheet) {
+    setSheetData(ss, USERS_SHEET, USERS_HEADERS, DEMO_USERS);
+    sheet = ss.getSheetByName(USERS_SHEET);
+  }
+  var values = sheet.getDataRange().getValues();
+  var h = values[0];
+  var col = function (name) { return h.indexOf(name); };
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i];
+    // Compare as text, zero-padded, in case the cell was typed as a number
+    // (Sheets turns 0000 into 0).
+    var rowPin = ('0000' + String(row[col('pin')]).trim()).slice(-4);
+    var active = col('active') === -1 || String(row[col('active')]).toLowerCase() !== 'false';
+    if (rowPin === pin && active) {
+      return {
+        success: true,
+        user: { id: String(row[col('id')]), name: String(row[col('name')]), role: String(row[col('role')] || 'staff') },
+      };
+    }
+  }
+  return { error: 'Wrong PIN' };
 }
 
 function rowFromObject(headers, obj) {
@@ -264,9 +313,13 @@ function seedSnackStationData() {
 
   // One row per bill from the Billing page. Each bill's items are ALSO
   // appended to SalesHistory (so they count in Today's Sales / Reports);
-  // this tab is the per-order record used for reprints. items is a JSON
-  // list of { productId, name, qty, price }.
-  setSheetData(ss, 'Bills', AUTO_CREATE_HEADERS.Bills, []);
+  // this tab is the per-order record used for reprints. customerId links
+  // to the Customers tab (blank for walk-ins); itemsSummary is readable,
+  // items is the JSON list of { productId, name, qty, price } the app uses.
+  setSheetData(ss, 'Billing', AUTO_CREATE_HEADERS.Billing, []);
+
+  // Login PINs (checked by the "login" action, never readable through GET).
+  setSheetData(ss, USERS_SHEET, USERS_HEADERS, DEMO_USERS);
 
   // Expenses / Inventory — Raw Material, Kitchen Appliances (equipment,
   // depreciated via usefulLifeMonths), Store Expenses, Salaries, Transport
