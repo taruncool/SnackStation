@@ -57,6 +57,7 @@ export class AppComponent {
   navItems: NavItem[] = [
     { label: 'Dashboard', path: '/dashboard', icon: 'speedometer-outline' },
     { label: 'Sales Count', path: '/sales-count', icon: 'checkmark-done-circle-outline' },
+    { label: 'Billing', path: '/billing', icon: 'receipt-outline' },
     { label: 'Products', path: '/products', icon: 'fast-food-outline' },
     { label: 'Categories', path: '/categories', icon: 'grid-outline' },
     { label: 'Customers', path: '/customers', icon: 'people-outline' },

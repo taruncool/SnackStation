@@ -26,6 +26,11 @@ function onOpen() {
     .addToUi();
 }
 
+// Header rows for tabs doPost() may create on the fly (see doPost).
+var AUTO_CREATE_HEADERS = {
+  Bills: ['id', 'date', 'createdAt', 'customerName', 'customerPhone', 'items', 'itemCount', 'subtotal', 'discountPercent', 'discount', 'total', 'paymentMethod'],
+};
+
 function doGet(e) {
   var sheetName = e.parameter.sheet;
   if (!sheetName) return jsonResponse({ error: 'Missing sheet parameter' });
@@ -47,9 +52,24 @@ function doPost(e) {
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(sheetName);
+  // Tabs added in later app versions (e.g. Bills) are created on first
+  // write, so an existing Sheet doesn't need re-seeding to get them.
+  if (!sheet && AUTO_CREATE_HEADERS[sheetName]) {
+    sheet = ss.insertSheet(sheetName);
+    sheet.getRange(1, 1, 1, AUTO_CREATE_HEADERS[sheetName].length).setValues([AUTO_CREATE_HEADERS[sheetName]]);
+    sheet.setFrozenRows(1);
+  }
   if (!sheet) return jsonResponse({ error: 'Sheet not found: ' + sheetName });
 
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  // A tab created by an older version may lack newer columns (e.g. Bills'
+  // discountPercent) — append them so those values aren't silently dropped.
+  var wanted = AUTO_CREATE_HEADERS[sheetName] || [];
+  var missing = wanted.filter(function (h) { return headers.indexOf(h) === -1; });
+  if (missing.length > 0) {
+    sheet.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+    headers = headers.concat(missing);
+  }
 
   if (action === 'add') {
     var addRow = sheet.getLastRow() + 1;
@@ -241,6 +261,12 @@ function seedSnackStationData() {
     ['id', 'date', 'productId', 'productName', 'qty', 'priceAtSale', 'costAtSale', 'submittedAt'],
     []
   );
+
+  // One row per bill from the Billing page. Each bill's items are ALSO
+  // appended to SalesHistory (so they count in Today's Sales / Reports);
+  // this tab is the per-order record used for reprints. items is a JSON
+  // list of { productId, name, qty, price }.
+  setSheetData(ss, 'Bills', AUTO_CREATE_HEADERS.Bills, []);
 
   // Expenses / Inventory — Raw Material, Kitchen Appliances (equipment,
   // depreciated via usefulLifeMonths), Store Expenses, Salaries, Transport

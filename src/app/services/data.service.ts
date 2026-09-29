@@ -77,6 +77,35 @@ export interface CartItem {
   qty: number;
 }
 
+export interface BillItem {
+  productId: string;
+  name: string;
+  qty: number;
+  price: number; // selling price per unit at the time of the bill
+}
+
+/** One customer order from the Billing page (a row in the Bills tab). */
+export interface Bill {
+  id: string; // bill number, e.g. SS260929-154233-07
+  date: string; // YYYY-MM-DD, local
+  createdAt: string; // ISO timestamp
+  customerName: string;
+  customerPhone: string;
+  items: BillItem[];
+  itemCount: number;
+  subtotal: number;
+  discountPercent: number; // 5 / 10 / 15 / 20, or 0 for none / a custom amount
+  discount: number; // rupees taken off the subtotal
+  total: number;
+  paymentMethod: string;
+}
+
+export type BillResult =
+  | { status: 'saved'; bill: Bill; billRecordSaved: boolean }
+  | { status: 'failed'; reason: string };
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 export interface DailySalesRecord {
   date: string; // YYYY-MM-DD
   submittedAt: string; // ISO timestamp of last submit for this date
@@ -176,6 +205,8 @@ export class DataService {
   private offers$ = new BehaviorSubject<Offer[]>([]);
   private expenses$ = new BehaviorSubject<Expense[]>([]);
   private cart$ = new BehaviorSubject<CartItem[]>([]);
+  private bills$ = new BehaviorSubject<Bill[]>([]);
+  private billsStatus$ = new BehaviorSubject<'loading' | 'loaded' | 'error'>('loading');
   private salesCount$ = new BehaviorSubject<Record<string, number>>({});
   /** How much of salesCount$ has already been sent to SalesHistory — a
    *  per-product submitted-so-far baseline, not exposed as an observable
@@ -570,7 +601,7 @@ export class DataService {
    * row ids before giving up. This also stops a retry from writing the same
    * sale twice.
    */
-  private async postRowsConfirmed(sheet: string, rows: { id: string }[]): Promise<boolean> {
+  private async postRowsConfirmed(sheet: string, rows: { id: string; [key: string]: unknown }[]): Promise<boolean> {
     this.lastWriteError = '';
     try {
       const res: any = await firstValueFrom(this.postSheet(sheet, 'addMany', rows));
@@ -873,4 +904,149 @@ export class DataService {
   clearCart() {
     this.cart$.next([]);
   }
+
+  /**
+   * Saves one customer bill. Its items go to SalesHistory first — the same
+   * rows "Submit Today's Sales" writes, so they show up in Today's Sales
+   * Count, Dashboard and Reports automatically — then the bill itself goes
+   * to the Bills tab (for reprints/history) and stock is deducted. A
+   * discount is spread across the items' priceAtSale so revenue stays
+   * accurate. Fails only if the sales rows couldn't be confirmed as saved;
+   * if just the Bills row fails, the sale still counts (billRecordSaved
+   * false) and the receipt can still be printed.
+   */
+  async submitBill(input: {
+    items: CartItem[];
+    customerName: string;
+    customerPhone: string;
+    discountPercent: number;
+    discount: number;
+    paymentMethod: string;
+  }): Promise<BillResult> {
+    const items: BillItem[] = input.items
+      .filter((i) => i.qty > 0)
+      .map((i) => ({ productId: i.product.id, name: i.product.name, qty: i.qty, price: i.product.sellingPrice }));
+    if (items.length === 0) return { status: 'failed', reason: 'The bill is empty.' };
+
+    const now = new Date();
+    const today = localDateKey(now);
+    const subtotal = round2(items.reduce((sum, i) => sum + i.qty * i.price, 0));
+    const discount = round2(Math.min(Math.max(0, Number(input.discount) || 0), subtotal));
+    const total = round2(subtotal - discount);
+    const id = billNumber(now);
+
+    const products = this.products$.value;
+    const factor = subtotal > 0 ? total / subtotal : 1;
+    const salesRows = items.map((i) => ({
+      id: `${id}-${i.productId}`,
+      date: today,
+      productId: i.productId,
+      productName: i.name,
+      qty: i.qty,
+      // 4 decimals so the discounted rows still add up to the bill total.
+      priceAtSale: Math.round(i.price * factor * 10000) / 10000,
+      costAtSale: products.find((p) => p.id === i.productId)?.costPrice || 0,
+      submittedAt: now.toISOString(),
+    }));
+    if (!(await this.postRowsConfirmed('SalesHistory', salesRows))) {
+      return { status: 'failed', reason: this.lastWriteError };
+    }
+    this.salesWriteSeq++;
+
+    const bill: Bill = {
+      id,
+      date: today,
+      createdAt: now.toISOString(),
+      customerName: (input.customerName || '').trim(),
+      customerPhone: (input.customerPhone || '').trim(),
+      items,
+      itemCount: items.reduce((sum, i) => sum + i.qty, 0),
+      subtotal,
+      discountPercent: discount > 0 ? Number(input.discountPercent) || 0 : 0,
+      discount,
+      total,
+      paymentMethod: input.paymentMethod,
+    };
+    const billRecordSaved = await this.postRowsConfirmed('Bills', [
+      { ...bill, items: JSON.stringify(bill.items) },
+    ]);
+    if (!billRecordSaved) console.error('Sale recorded, but saving the bill record failed:', this.lastWriteError);
+
+    // Same as a Sales Count submit: send FULL product rows, since the
+    // sheet's update replaces the whole row.
+    const stockUpdates = items
+      .map((i) => {
+        const product = products.find((p) => p.id === i.productId);
+        return product ? { ...product, stockQty: Math.max(0, product.stockQty - i.qty) } : null;
+      })
+      .filter((p): p is Product => p !== null);
+    if (stockUpdates.length > 0) {
+      try {
+        await firstValueFrom(this.postSheet('Products', 'updateMany', stockUpdates));
+      } catch (err) {
+        console.error('Bill was recorded, but deducting stock failed', err);
+      }
+    }
+
+    this.refreshSalesHistory();
+    this.refreshProducts();
+    this.refreshBills();
+    return { status: 'saved', bill, billRecordSaved };
+  }
+
+  // ---- Bills (per-order records from the Billing page) ----
+  refreshBills() {
+    if (this.billsStatus$.value !== 'loaded') this.billsStatus$.next('loading');
+    this.getSheet<any>('Bills').subscribe({
+      next: (rows) => {
+        const bills = rows
+          .filter((r) => r.id)
+          .map((r) => {
+            let items: BillItem[] = [];
+            try {
+              items = typeof r.items === 'string' ? JSON.parse(r.items) : r.items || [];
+            } catch {
+              items = [];
+            }
+            return {
+              id: String(r.id),
+              date: String(r.date || ''),
+              createdAt: String(r.createdAt || ''),
+              customerName: String(r.customerName || ''),
+              customerPhone: String(r.customerPhone || ''),
+              items: items.map((i) => ({ ...i, qty: Number(i.qty) || 0, price: Number(i.price) || 0 })),
+              itemCount: Number(r.itemCount) || 0,
+              subtotal: Number(r.subtotal) || 0,
+              discountPercent: Number(r.discountPercent) || 0,
+              discount: Number(r.discount) || 0,
+              total: Number(r.total) || 0,
+              paymentMethod: String(r.paymentMethod || ''),
+            } as Bill;
+          })
+          .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+        this.bills$.next(bills);
+        this.billsStatus$.next('loaded');
+      },
+      error: (err) => {
+        console.error('Failed to load Bills from Google Sheets', err);
+        if (this.billsStatus$.value !== 'loaded') this.billsStatus$.next('error');
+      },
+    });
+  }
+  getBills() {
+    return this.bills$.asObservable();
+  }
+  getBillsStatus() {
+    return this.billsStatus$.asObservable();
+  }
+}
+
+/** Bill numbers readable on a receipt and unique across devices without a
+ *  server counter: SS + yymmdd - hhmmss - 2 random digits. */
+function billNumber(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const rand = pad(Math.floor(Math.random() * 100));
+  return `SS${String(d.getFullYear()).slice(2)}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(
+    d.getHours()
+  )}${pad(d.getMinutes())}${pad(d.getSeconds())}-${rand}`;
 }
