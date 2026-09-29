@@ -1,7 +1,12 @@
+import { importProvidersFrom } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { RouteReuseStrategy, provideRouter } from '@angular/router';
 import { provideHttpClient } from '@angular/common/http';
-import { IonicRouteStrategy, provideIonicAngular } from '@ionic/angular/standalone';
+// Every page imports IonicModule from '@ionic/angular' (the lazy-loading
+// build), so Ionic must be set up with IonicModule.forRoot() — that's what
+// registers the <ion-*> elements. The '@ionic/angular/standalone' provider
+// doesn't, which left the production build (and the APK) as unstyled text.
+import { IonicModule, IonicRouteStrategy } from '@ionic/angular';
 
 import { AppComponent } from './app/app.component';
 import { routes } from './app/app.routes';
@@ -16,7 +21,7 @@ import { routes } from './app/app.routes';
 bootstrapApplication(AppComponent, {
   providers: [
     { provide: RouteReuseStrategy, useClass: IonicRouteStrategy },
-    provideIonicAngular({}),
+    importProvidersFrom(IonicModule.forRoot({})),
     provideRouter(routes),
     provideHttpClient(),
   ],

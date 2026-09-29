@@ -86,6 +86,19 @@ export interface DailySalesRecord {
   totalProfit: number;
 }
 
+/** Today's date (YYYY-MM-DD) on this device's clock. toISOString() would give
+ *  the UTC date, which in India only rolls over at 5:30 AM — so early
+ *  sales landed under yesterday and the counter reset at the wrong time. */
+export function localDateKey(d = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+export type SubmitResult =
+  | { status: 'saved'; record: DailySalesRecord }
+  | { status: 'nothing' } // every tap is already in the Sheet
+  | { status: 'failed'; reason: string };
+
 // Only the Sales Count *working tally* stays in localStorage (per device,
 // instant taps, no network round trip) — everything else below now lives in
 // your Google Sheet, see the class comment.
@@ -98,6 +111,14 @@ const STORAGE_WORKING_DATE = 'snackstation_sales_working_date';
 // lets the displayed count stay visible after "Submit Today's Sales"
 // (rather than resetting to 0) while still only submitting each tap once.
 const STORAGE_SUBMITTED_BASELINE = 'snackstation_sales_submitted_baseline';
+// The last submit whose rows weren't confirmed as saved: their ids and the
+// per-product qty they carried. If those ids later turn up in SalesHistory
+// (the write landed, only the reply was lost), that qty counts as submitted.
+const STORAGE_PENDING_SUBMIT = 'snackstation_sales_pending_submit';
+interface PendingSubmit {
+  ids: string[];
+  deltas: Record<string, number>;
+}
 
 function loadJSON<T>(key: string, fallback: T): T {
   try {
@@ -160,6 +181,11 @@ export class DataService {
    *  per-product submitted-so-far baseline, not exposed as an observable
    *  since only submitTodaysSales()'s delta math needs it. */
   private submittedBaseline: Record<string, number> = {};
+  /** Bumped on every confirmed SalesHistory write, so a Sheet read that
+   *  started before it can't roll the tally back (syncSubmittedFromSheet). */
+  private salesWriteSeq = 0;
+  /** Why the last postRowsConfirmed() failed — shown in the page's toast. */
+  private lastWriteError = '';
   private salesHistory$ = new BehaviorSubject<DailySalesRecord[]>([]);
 
   /** Still static demo figures — see google-apps-script/SETUP.md for what's live vs. not yet. */
@@ -176,14 +202,21 @@ export class DataService {
     this.refreshCustomers();
     this.refreshOffers();
     this.refreshExpenses();
-    this.refreshSalesHistory();
     this.loadWorkingTally();
+    // The counter shows today's SAVED sales only: it starts empty and is
+    // filled from the SalesHistory sheet as soon as it loads. Taps left
+    // unsubmitted from an earlier visit are dropped, not shown as today's.
+    this.salesCount$.next({});
+    this.submittedBaseline = {};
+    saveJSON(STORAGE_WORKING, {});
+    saveJSON(STORAGE_SUBMITTED_BASELINE, {});
+    this.refreshSalesHistory();
   }
 
   /** Loads today's working tally + submitted baseline from localStorage,
    *  or starts fresh if the stored tally belongs to a previous day. */
   private loadWorkingTally() {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateKey();
     const storedDate = loadJSON<string | null>(STORAGE_WORKING_DATE, null);
 
     // First run after upgrading from a version that didn't track the date
@@ -205,6 +238,7 @@ export class DataService {
       saveJSON(STORAGE_WORKING_DATE, today);
       saveJSON(STORAGE_WORKING, {});
       saveJSON(STORAGE_SUBMITTED_BASELINE, {});
+      saveJSON(STORAGE_PENDING_SUBMIT, null);
       return;
     }
 
@@ -409,13 +443,14 @@ export class DataService {
     this.salesCount$.next(counts);
     saveJSON(STORAGE_WORKING, counts);
   }
-  /** Clears the ENTIRE day's tally, submitted or not — for "start over",
-   *  not for normal use after a submit (which keeps counts visible). */
+  /** Throws away taps that haven't been submitted yet, dropping each count
+   *  back to what's already saved in the Sheet. Submitted counts stay —
+   *  they're re-synced from SalesHistory anyway; use the reduce flow to
+   *  take a submitted sale back out. */
   resetSalesCounts() {
-    this.salesCount$.next({});
-    this.submittedBaseline = {};
-    saveJSON(STORAGE_WORKING, {});
-    saveJSON(STORAGE_SUBMITTED_BASELINE, {});
+    const counts = { ...this.submittedBaseline };
+    this.salesCount$.next(counts);
+    saveJSON(STORAGE_WORKING, counts);
   }
   getTotalSalesCountToday() {
     return Object.values(this.salesCount$.value).reduce((sum, n) => sum + n, 0);
@@ -434,10 +469,20 @@ export class DataService {
    * sales: writes one row per counted product to the SalesHistory sheet
    * tab, deducts stock in the Products sheet, then raises the submitted
    * baseline so those same taps are never sent twice — the displayed tally
-   * itself is left untouched (see class comment above). Returns null if
-   * there's nothing new to submit, or if the write fails.
+   * itself is left untouched (see class comment above). Reports 'nothing'
+   * when every tap is already in the Sheet, and 'failed' only when the
+   * rows really couldn't be confirmed as saved.
    */
-  async submitTodaysSales(): Promise<DailySalesRecord | null> {
+  async submitTodaysSales(): Promise<SubmitResult> {
+    // Catch up with the Sheet first: if an earlier submit landed but its
+    // reply was lost, those items are already saved and must not be sent
+    // (or counted as "not submitted") again.
+    try {
+      const seq = this.salesWriteSeq;
+      this.syncSubmittedFromSheet(await firstValueFrom(this.getSheet<any>('SalesHistory')), seq);
+    } catch (err) {
+      console.error("Couldn't re-read SalesHistory before submitting — using this device's record", err);
+    }
     this.loadWorkingTally();
     const counts = this.salesCount$.value;
     const deltas: Record<string, number> = {};
@@ -446,10 +491,10 @@ export class DataService {
       if (delta > 0) deltas[id] = delta;
     }
     const totalItems = Object.values(deltas).reduce((sum, n) => sum + n, 0);
-    if (totalItems === 0) return null;
+    if (totalItems === 0) return { status: 'nothing' };
 
     const products = this.products$.value;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateKey();
     const submittedAt = new Date().toISOString();
 
     const rows = Object.entries(deltas).map(([productId, qty]) => {
@@ -468,7 +513,13 @@ export class DataService {
     const totalRevenue = rows.reduce((sum, r) => sum + r.qty * r.priceAtSale, 0);
     const totalProfit = rows.reduce((sum, r) => sum + r.qty * (r.priceAtSale - r.costAtSale), 0);
 
-    if (!(await this.postRowsConfirmed('SalesHistory', rows))) return null;
+    const pending: PendingSubmit = { ids: rows.map((r) => r.id), deltas };
+    saveJSON(STORAGE_PENDING_SUBMIT, pending);
+    if (!(await this.postRowsConfirmed('SalesHistory', rows))) {
+      return { status: 'failed', reason: this.lastWriteError };
+    }
+    saveJSON(STORAGE_PENDING_SUBMIT, null);
+    this.salesWriteSeq++;
 
     // Deduct sold quantities from stock (only the NEW delta, not the whole
     // day's tally, since earlier taps were already deducted on a prior
@@ -499,12 +550,15 @@ export class DataService {
     this.refreshProducts();
 
     return {
-      date: today,
-      submittedAt,
-      items: rows.map((r) => ({ productId: r.productId, productName: r.productName, qty: r.qty })),
-      totalItems,
-      totalRevenue,
-      totalProfit,
+      status: 'saved',
+      record: {
+        date: today,
+        submittedAt,
+        items: rows.map((r) => ({ productId: r.productId, productName: r.productName, qty: r.qty })),
+        totalItems,
+        totalRevenue,
+        totalProfit,
+      },
     };
   }
 
@@ -517,31 +571,97 @@ export class DataService {
    * sale twice.
    */
   private async postRowsConfirmed(sheet: string, rows: { id: string }[]): Promise<boolean> {
+    this.lastWriteError = '';
     try {
-      const res = await firstValueFrom(this.postSheet(sheet, 'addMany', rows));
+      const res: any = await firstValueFrom(this.postSheet(sheet, 'addMany', rows));
       if (res?.error) {
         console.error(`Apps Script rejected the ${sheet} write:`, res.error);
+        this.lastWriteError = `Google Sheets said: ${res.error}`;
         return false;
       }
-      return true;
+      // Only an explicit {success:true} counts — anything else (an HTML
+      // page, a GET-style row list) means doPost didn't run as expected.
+      if (res?.success === true) return true;
+      console.error(`Unexpected reply to the ${sheet} write — checking whether it saved`, res);
+      this.lastWriteError = `Unexpected reply from Google Sheets: ${JSON.stringify(res)?.slice(0, 120)}`;
     } catch (err: any) {
       console.error(
         `POST to ${sheet} reported an error (status ${err?.status}) — checking whether it saved anyway`,
         err
       );
+      const page = String(err?.error?.text ?? '');
+      this.lastWriteError = page.includes('do not have permission')
+        ? "Google Sheets refused the write — the Apps Script's account doesn't have edit access to the spreadsheet (see SETUP.md)."
+        : `Request failed (status ${err?.status ?? '?'}): ${err?.message ?? err}`.slice(0, 160);
     }
     const ids = rows.map((r) => r.id);
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 800 : 1500));
+    // The script can still be mid-write when the browser gives up on the
+    // reply (cold start, a batch of rows), so keep checking for ~15s.
+    for (let attempt = 0; attempt < 6; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1000 : 2500));
       try {
         const existing = await firstValueFrom(this.getSheet<any>(sheet));
         const have = new Set(existing.map((r) => String(r.id)));
-        if (ids.every((id) => have.has(id))) return true;
+        if (ids.every((id) => have.has(id))) {
+          this.lastWriteError = '';
+          return true;
+        }
       } catch (err) {
         console.error(`Couldn't re-read ${sheet} to verify the write`, err);
       }
     }
     return false;
+  }
+
+  /**
+   * The SalesHistory sheet is the real record of what's been submitted
+   * today, so the on-screen tally is rebuilt from it: each product shows
+   * today's saved qty (correcting -1 rows included) plus whatever this
+   * device has tapped but not submitted yet. That keeps the counter to
+   * today's sales only (a leftover local tally can't inflate it), and a
+   * submit whose reply was lost is still recognised as saved — so it isn't
+   * sent again, and reducing it asks for confirmation.
+   *
+   * `readSeq` is salesWriteSeq when the read was started; if a submit or
+   * reduction has landed since, the read may predate it and is ignored.
+   */
+  private syncSubmittedFromSheet(rows: any[], readSeq: number) {
+    if (readSeq !== this.salesWriteSeq) return;
+    this.loadWorkingTally();
+    const today = localDateKey();
+    const saved: Record<string, number> = {};
+    for (const r of rows) {
+      if (r.date !== today || !r.productId) continue;
+      saved[r.productId] = (saved[r.productId] || 0) + (Number(r.qty) || 0);
+    }
+
+    // Taps from an unconfirmed submit that did land are no longer
+    // "unsubmitted" — without this they'd be counted twice.
+    const localBaseline = { ...this.submittedBaseline };
+    const pending = loadJSON<PendingSubmit | null>(STORAGE_PENDING_SUBMIT, null);
+    if (pending) {
+      const have = new Set(rows.map((r) => String(r.id)));
+      if (pending.ids.every((id) => have.has(id))) {
+        for (const [id, qty] of Object.entries(pending.deltas)) {
+          localBaseline[id] = (localBaseline[id] || 0) + qty;
+        }
+        saveJSON(STORAGE_PENDING_SUBMIT, null);
+      }
+    }
+
+    const current = this.salesCount$.value;
+    const counts: Record<string, number> = {};
+    const baseline: Record<string, number> = {};
+    for (const id of new Set([...Object.keys(saved), ...Object.keys(current)])) {
+      const savedQty = Math.max(0, saved[id] || 0);
+      const unsubmitted = Math.max(0, (current[id] || 0) - (localBaseline[id] || 0));
+      if (savedQty) baseline[id] = savedQty;
+      if (savedQty + unsubmitted) counts[id] = savedQty + unsubmitted;
+    }
+    this.submittedBaseline = baseline;
+    saveJSON(STORAGE_SUBMITTED_BASELINE, baseline);
+    this.salesCount$.next(counts);
+    saveJSON(STORAGE_WORKING, counts);
   }
 
   /** How much of a product's count has already been submitted today. */
@@ -564,7 +684,7 @@ export class DataService {
     const product = this.products$.value.find((p) => p.id === productId);
     if (!product || current <= 0 || submitted <= 0) return false;
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = localDateKey();
     const row = {
       id: `${today}-${productId}-adj-${Date.now()}`,
       date: today,
@@ -576,6 +696,7 @@ export class DataService {
       submittedAt: new Date().toISOString(),
     };
     if (!(await this.postRowsConfirmed('SalesHistory', [row]))) return false;
+    this.salesWriteSeq++;
 
     try {
       await firstValueFrom(
@@ -597,8 +718,10 @@ export class DataService {
 
   refreshSalesHistory() {
     if (this.salesHistoryStatus$.value !== 'loaded') this.salesHistoryStatus$.next('loading');
+    const seq = this.salesWriteSeq;
     this.getSheet<any>('SalesHistory').subscribe({
       next: (rows) => {
+        this.syncSubmittedFromSheet(rows, seq);
         const grouped: Record<string, DailySalesRecord> = {};
         for (const r of rows) {
           const date = r.date;

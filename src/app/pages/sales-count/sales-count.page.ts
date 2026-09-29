@@ -100,18 +100,18 @@ export class SalesHistoryModal {
           </div>
         </div>
 
-        <div *ngIf="productsStatus === 'loading'" class="ion-text-center" style="padding:40px 0;">
+        <div *ngIf="pageStatus === 'loading'" class="ion-text-center" style="padding:40px 0;">
           <ion-spinner name="crescent" color="primary"></ion-spinner>
-          <p style="color:var(--ion-color-medium); margin-top:12px;">Loading products…</p>
+          <p style="color:var(--ion-color-medium); margin-top:12px;">Loading today's sales…</p>
         </div>
-        <div *ngIf="productsStatus === 'error'" class="ion-text-center" style="padding:40px 16px;">
+        <div *ngIf="pageStatus === 'error'" class="ion-text-center" style="padding:40px 16px;">
           <p style="color:var(--ion-color-danger); margin:0 0 12px;">
-            Couldn't load products — check your connection and try again.
+            Couldn't load today's sales — check your connection and try again.
           </p>
           <ion-button size="small" (click)="retryProducts()">Retry</ion-button>
         </div>
 
-        <ion-grid *ngIf="productsStatus === 'loaded'">
+        <ion-grid *ngIf="pageStatus === 'loaded'">
           <ion-row>
             <ion-col size="6" size-md="4" size-lg="3" *ngFor="let p of filtered">
               <ion-card class="ss-card" style="position:relative;">
@@ -154,7 +154,7 @@ export class SalesHistoryModal {
           </ion-row>
         </ion-grid>
         <p
-          *ngIf="productsStatus === 'loaded' && filtered.length === 0"
+          *ngIf="pageStatus === 'loaded' && filtered.length === 0"
           class="ion-text-center"
           style="color:var(--ion-color-medium);"
         >
@@ -169,7 +169,7 @@ export class SalesHistoryModal {
           expand="block"
           color="primary"
           style="margin:8px;"
-          [disabled]="unsubmittedCount === 0 || submitting || productsStatus !== 'loaded'"
+          [disabled]="unsubmittedCount === 0 || submitting || pageStatus !== 'loaded'"
           (click)="submit()"
         >
           <ion-spinner *ngIf="submitting" name="dots" style="margin-right:8px;"></ion-spinner>
@@ -232,6 +232,7 @@ export class SalesCountPage {
   query = '';
   submitting = false;
   productsStatus: 'loading' | 'loaded' | 'error' = 'loading';
+  historyStatus: 'loading' | 'loaded' | 'error' = 'loading';
   private reduceAlertOpen = false;
 
   constructor(
@@ -244,10 +245,20 @@ export class SalesCountPage {
     this.data.getProducts().subscribe((p) => (this.products = p.filter((x) => x.status === 'active')));
     this.data.getSalesCounts().subscribe((c) => (this.counts = c));
     this.data.getProductsStatus().subscribe((st) => (this.productsStatus = st));
+    this.data.getSalesHistoryStatus().subscribe((st) => (this.historyStatus = st));
+  }
+
+  /** Cards only appear once today's saved counts are in from the Sheet, so
+   *  the reduce-count check always knows what's already been saved. */
+  get pageStatus(): 'loading' | 'loaded' | 'error' {
+    if (this.productsStatus === 'error' || this.historyStatus === 'error') return 'error';
+    if (this.productsStatus === 'loading' || this.historyStatus === 'loading') return 'loading';
+    return 'loaded';
   }
 
   retryProducts() {
-    this.data.refreshProducts();
+    if (this.productsStatus === 'error') this.data.refreshProducts();
+    if (this.historyStatus === 'error') this.data.refreshSalesHistory();
   }
 
   get filtered() {
@@ -290,8 +301,8 @@ export class SalesCountPage {
     if (this.reduceAlertOpen) return;
     this.reduceAlertOpen = true;
     const alert = await this.alertCtrl.create({
-      header: "Reduce today's sale?",
-      message: `You have already submitted this product count under today's sale. Do you really want to reduce the count of ${p.name} from today's sale?`,
+      header: 'Already saved today',
+      message: `You have already saved this sale count today. Do you really want to decrease the ${p.name} sale count from today's sales?`,
       buttons: [
         { text: 'Cancel', role: 'cancel' },
         {
@@ -333,9 +344,9 @@ export class SalesCountPage {
 
   async confirmReset() {
     const alert = await this.alertCtrl.create({
-      header: 'Clear the counter?',
+      header: 'Clear unsubmitted counts?',
       message:
-        'This only resets the counter on this screen to 0. Sales you already submitted stay in sales history.',
+        "This removes the counts you haven't submitted yet. Sales you already submitted stay in today's sale.",
       buttons: [
         { text: 'Cancel', role: 'cancel' },
         {
@@ -357,6 +368,9 @@ export class SalesCountPage {
         {
           text: 'Submit',
           handler: async () => {
+            // A second tap on Submit before the loader covers the alert
+            // would start a second submit of the same taps.
+            if (this.submitting) return;
             this.submitting = true;
             const loader = await this.loadingCtrl.create({
               message: 'Submitting today\'s sales…',
@@ -365,23 +379,19 @@ export class SalesCountPage {
             });
             await loader.present();
             try {
-              const record = await this.data.submitTodaysSales();
+              const result = await this.data.submitTodaysSales();
               await loader.dismiss();
-              if (record) {
-                const toast = await this.toastCtrl.create({
-                  message: `Recorded ${record.totalItems} items for ${record.date} (₹${record.totalRevenue.toLocaleString()} total).`,
-                  duration: 2500,
-                  color: 'primary',
-                });
-                await toast.present();
-              } else {
-                const toast = await this.toastCtrl.create({
-                  message: `Couldn't submit — check your connection or Google Sheets setup.`,
-                  duration: 2500,
-                  color: 'danger',
-                });
-                await toast.present();
-              }
+              const toast = await this.toastCtrl.create({
+                message:
+                  result.status === 'saved'
+                    ? `Recorded ${result.record.totalItems} items for ${result.record.date} (₹${result.record.totalRevenue.toLocaleString()} total).`
+                    : result.status === 'nothing'
+                    ? `Today's sales are already submitted — nothing new to send.`
+                    : `Couldn't submit — ${result.reason || 'check your connection or Google Sheets setup.'}`,
+                duration: result.status === 'failed' ? 8000 : 2500,
+                color: result.status === 'failed' ? 'danger' : 'primary',
+              });
+              await toast.present();
             } catch (err) {
               console.error('Submit failed', err);
               await loader.dismiss().catch(() => {});

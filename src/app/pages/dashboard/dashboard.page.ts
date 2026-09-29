@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { IonicModule } from '@ionic/angular';
 import { DataStateComponent } from '../../shared/data-state.component';
-import { DataService, Product, DailySalesRecord } from '../../services/data.service';
+import { DataService, Product, DailySalesRecord, localDateKey } from '../../services/data.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -239,7 +239,7 @@ export class DashboardPage {
 
   private recordsInRange(): DailySalesRecord[] {
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
+    const todayStr = localDateKey(now);
     return this.salesHistory.filter((r) => {
       if (this.range === 'daily') return r.date === todayStr;
       if (this.range === 'weekly') {
