@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { IonicModule } from '@ionic/angular';
 import { DataStateComponent } from '../../shared/data-state.component';
-import { DataService, Product, DailySalesRecord, localDateKey } from '../../services/data.service';
+import { Bill, DataService, Product, DailySalesRecord, localDateKey } from '../../services/data.service';
 
 @Component({
   selector: 'app-dashboard',
@@ -39,9 +39,9 @@ import { DataService, Product, DailySalesRecord, localDateKey } from '../../serv
               </div>
             </ion-col>
             <ion-col size="6" size-md="3">
-              <div class="ss-stat-card ss-card" (click)="goToSalesCount()" style="cursor:pointer;">
-                <div class="ss-stat-value">{{ dashboard.billsCount }}</div>
-                <div class="ss-stat-label">Bills</div>
+              <div class="ss-stat-card ss-card" (click)="goToBilling()" style="cursor:pointer;">
+                <div class="ss-stat-value">{{ billsStatus === 'loaded' ? billsCount : '…' }}</div>
+                <div class="ss-stat-label">Bills ({{ rangeLabel() }})<span class="ss-live-dot" title="Live from the Billing tab"></span></div>
               </div>
             </ion-col>
             <ion-col size="6" size-md="3">
@@ -212,6 +212,9 @@ export class DashboardPage {
   topSelling: { name: string; image: string; unitsSold: number }[] = [];
   private allProducts: Product[] = [];
   private salesHistory: DailySalesRecord[] = [];
+  private bills: Bill[] = [];
+  billsCount = 0;
+  billsStatus: 'loading' | 'loaded' | 'error' = 'loading';
 
   historyStatus: 'loading' | 'loaded' | 'error' = 'loading';
 
@@ -230,29 +233,48 @@ export class DashboardPage {
       this.salesHistory = history;
       this.recompute();
     });
+    this.data.getBillsStatus().subscribe((st) => (this.billsStatus = st));
+    this.data.getBills().subscribe((bills) => {
+      this.bills = bills;
+      this.recompute();
+    });
+  }
+
+  /** Ionic keeps this page alive between visits, so reload every time it's
+   *  opened — a bill or sales submit made elsewhere shows up straight away. */
+  ionViewWillEnter() {
     this.data.refreshSalesHistory();
+    this.data.refreshBills();
+  }
+
+  goToBilling() {
+    this.router.navigateByUrl('/billing');
   }
 
   onRangeChange() {
     this.recompute();
   }
 
-  private recordsInRange(): DailySalesRecord[] {
+  /** Whether a YYYY-MM-DD date falls in the selected Day/Week/Month/Year. */
+  private inRange(date: string) {
     const now = new Date();
     const todayStr = localDateKey(now);
-    return this.salesHistory.filter((r) => {
-      if (this.range === 'daily') return r.date === todayStr;
-      if (this.range === 'weekly') {
-        const diffDays = (now.getTime() - new Date(r.date + 'T00:00:00').getTime()) / 86400000;
-        return diffDays >= 0 && diffDays < 7;
-      }
-      if (this.range === 'monthly') return r.date.slice(0, 7) === todayStr.slice(0, 7);
-      if (this.range === 'yearly') return r.date.slice(0, 4) === todayStr.slice(0, 4);
-      return false;
-    });
+    if (this.range === 'daily') return date === todayStr;
+    if (this.range === 'weekly') {
+      const diffDays = (now.getTime() - new Date(date + 'T00:00:00').getTime()) / 86400000;
+      return diffDays >= 0 && diffDays < 7;
+    }
+    if (this.range === 'monthly') return date.slice(0, 7) === todayStr.slice(0, 7);
+    if (this.range === 'yearly') return date.slice(0, 4) === todayStr.slice(0, 4);
+    return false;
+  }
+
+  private recordsInRange(): DailySalesRecord[] {
+    return this.salesHistory.filter((r) => this.inRange(r.date));
   }
 
   private recompute() {
+    this.billsCount = this.bills.filter((b) => this.inRange(b.date)).length;
     const records = this.recordsInRange();
     this.revenue = records.reduce((s, r) => s + r.totalRevenue, 0);
     this.profit = records.reduce((s, r) => s + r.totalProfit, 0);

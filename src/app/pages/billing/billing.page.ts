@@ -9,7 +9,8 @@ import {
   ModalController,
   ToastController,
 } from '@ionic/angular';
-import { Bill, CartItem, DataService, Product, localDateKey } from '../../services/data.service';
+import { Bill, CartItem, Customer, DataService, Product, localDateKey } from '../../services/data.service';
+import { AuthService } from '../../services/auth.service';
 import { PairedPrinter, PrinterService, PrinterSettings, SHOP, formatDateTime } from '../../services/printer.service';
 
 /** Printer choice + paper width, remembered per device. */
@@ -270,7 +271,7 @@ export class BillReceiptModal implements OnInit {
   }
 }
 
-/** Today's bills from the Bills tab, newest first — tap one to reprint. */
+/** Today's bills from the Billing tab, newest first — tap one to reprint. */
 @Component({
   selector: 'app-bills-history-modal',
   standalone: true,
@@ -457,9 +458,6 @@ type DiscountMode = 0 | 5 | 10 | 15 | 20 | 'custom';
                 </ion-list>
 
                 <ion-item lines="full">
-                  <ion-input label="Customer name" labelPlacement="stacked" placeholder="Optional" [(ngModel)]="customerName"></ion-input>
-                </ion-item>
-                <ion-item lines="full">
                   <ion-input
                     label="Phone"
                     labelPlacement="stacked"
@@ -468,7 +466,15 @@ type DiscountMode = 0 | 5 | 10 | 15 | 20 | 'custom';
                     maxlength="15"
                     placeholder="Optional"
                     [(ngModel)]="customerPhone"
+                    (ionInput)="onPhoneInput()"
                   ></ion-input>
+                </ion-item>
+                <div *ngIf="customerNote" class="customer-note" [class.known]="!!matchedCustomer">
+                  <ion-icon [name]="matchedCustomer ? 'person-circle-outline' : 'person-add-outline'"></ion-icon>
+                  <span>{{ customerNote }}</span>
+                </div>
+                <ion-item lines="full">
+                  <ion-input label="Customer name" labelPlacement="stacked" placeholder="Optional" [(ngModel)]="customerName"></ion-input>
                 </ion-item>
                 <div class="discount-picker">
                   <div class="discount-label">Discount</div>
@@ -557,6 +563,15 @@ type DiscountMode = 0 | 5 | 10 | 15 | 20 | 'custom';
   styles: [
     `
       .view-bill { margin: 0; }
+      .customer-note {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 16px 0;
+        font-size: 12px;
+        color: var(--ion-color-medium);
+      }
+      .customer-note.known { color: var(--ion-color-primary); font-weight: 600; }
       .ss-tap-overlay { position: absolute; inset: 0; display: flex; }
       .ss-tap-zone { flex: 1; cursor: pointer; }
       .ss-zone-hint { position: absolute; top: 2px; font-size: 14px; opacity: 0.3; pointer-events: none; }
@@ -613,6 +628,7 @@ export class BillingPage {
   query = '';
   customerName = '';
   customerPhone = '';
+  matchedCustomer: Customer | undefined;
   readonly discountOptions: { label: string; value: DiscountMode }[] = [
     { label: 'None', value: 0 },
     { label: '5%', value: 5 },
@@ -629,6 +645,7 @@ export class BillingPage {
 
   constructor(
     public data: DataService,
+    private auth: AuthService,
     private printer: PrinterService,
     private alertCtrl: AlertController,
     private loadingCtrl: LoadingController,
@@ -672,6 +689,22 @@ export class BillingPage {
 
   get total() {
     return this.subtotal - this.appliedDiscount;
+  }
+
+  /** Links the bill to a saved customer as soon as a known number is typed. */
+  onPhoneInput() {
+    const found = this.data.findCustomerByPhone(this.customerPhone);
+    if (found && found !== this.matchedCustomer && !this.customerName.trim()) this.customerName = found.name;
+    this.matchedCustomer = found;
+  }
+
+  get customerNote() {
+    if (this.matchedCustomer) {
+      const c = this.matchedCustomer;
+      return `Existing customer ${c.id} · ${c.name} · ${Number(c.totalOrders) || 0} orders`;
+    }
+    const digits = this.customerPhone.replace(/\D/g, '');
+    return digits.length >= 10 ? 'New customer — will be added to Customers' : '';
   }
 
   get itemCount() {
@@ -741,6 +774,7 @@ export class BillingPage {
         discountPercent: this.discountPercent,
         discount: this.appliedDiscount,
         paymentMethod: this.paymentMethod,
+        billedBy: this.auth.user?.name || '',
       });
       clearTimeout(slowTimer);
       await loader.dismiss();
@@ -763,7 +797,7 @@ export class BillingPage {
           autoPrint: !this.printer.isNative || !!this.printer.getSettings(),
           warning: result.billRecordSaved
             ? ''
-            : "The sale is recorded in today's sales, but this bill couldn't be saved to the Bills list, so it won't appear under Today's Bills.",
+            : "The sale is recorded in today's sales, but this bill couldn't be saved to the Billing tab, so it won't appear under Today's Bills.",
         },
       });
       await modal.present();
@@ -790,6 +824,7 @@ export class BillingPage {
     this.data.clearCart();
     this.customerName = '';
     this.customerPhone = '';
+    this.matchedCustomer = undefined;
     this.discountMode = 0;
     this.customDiscount = null;
     this.paymentMethod = 'cash';

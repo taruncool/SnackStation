@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { IonicModule, ModalController } from '@ionic/angular';
+import { IonicModule, ModalController, ToastController } from '@ionic/angular';
 import { DataStateComponent } from '../../shared/data-state.component';
 import { Customer, DataService } from '../../services/data.service';
 
@@ -19,38 +19,121 @@ import { Customer, DataService } from '../../services/data.service';
       </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
-      <ion-item>
-        <ion-label position="stacked">Name</ion-label>
-        <ion-input [(ngModel)]="customer.name"></ion-input>
+      <ion-item [class.invalid]="!!errors.name">
+        <ion-label position="stacked">Name *</ion-label>
+        <ion-input
+          [(ngModel)]="customer.name"
+          (ionInput)="errors.name = ''"
+          placeholder="Customer name"
+          autocapitalize="words"
+        ></ion-input>
       </ion-item>
-      <ion-item>
-        <ion-label position="stacked">Phone</ion-label>
-        <ion-input type="tel" [(ngModel)]="customer.phone"></ion-input>
+      <p class="field-error" *ngIf="errors.name">{{ errors.name }}</p>
+
+      <ion-item [class.invalid]="!!errors.phone">
+        <ion-label position="stacked">Phone *</ion-label>
+        <ion-input
+          type="tel"
+          inputmode="numeric"
+          maxlength="10"
+          placeholder="10-digit mobile number"
+          [(ngModel)]="customer.phone"
+          (ionInput)="onPhoneInput()"
+        ></ion-input>
       </ion-item>
-      <ion-item lines="none">
-        <ion-label position="stacked">Email</ion-label>
-        <ion-input type="email" [(ngModel)]="customer.email"></ion-input>
+      <p class="field-error" *ngIf="errors.phone">{{ errors.phone }}</p>
+
+      <ion-item lines="none" [class.invalid]="!!errors.email">
+        <ion-label position="stacked">Email (optional)</ion-label>
+        <ion-input
+          type="email"
+          inputmode="email"
+          placeholder="name@example.com"
+          [(ngModel)]="customer.email"
+          (ionInput)="errors.email = ''"
+        ></ion-input>
       </ion-item>
-      <ion-button expand="block" color="primary" style="margin-top:20px;" (click)="save()">
-        Save Customer
+      <p class="field-error" *ngIf="errors.email">{{ errors.email }}</p>
+
+      <ion-button expand="block" color="primary" style="margin-top:20px;" [disabled]="saving" (click)="save()">
+        <ion-spinner *ngIf="saving" name="dots" style="margin-right:8px;"></ion-spinner>
+        {{ saving ? 'Saving…' : 'Save Customer' }}
       </ion-button>
     </ion-content>
   `,
+  styles: [
+    `
+      .field-error {
+        color: var(--ion-color-danger);
+        font-size: 12px;
+        margin: 4px 16px 8px;
+      }
+      ion-item.invalid {
+        --border-color: var(--ion-color-danger);
+        --highlight-color-focused: var(--ion-color-danger);
+      }
+    `,
+  ],
 })
 export class CustomerFormModal {
-  customer: Partial<Customer> = { group: 'New', loyaltyPoints: 0, outstandingAmount: 0, totalOrders: 0 };
+  customer: Partial<Customer> = { name: '', phone: '', email: '' };
+  errors: { name?: string; phone?: string; email?: string } = {};
+  saving = false;
 
-  constructor(private modalCtrl: ModalController, private data: DataService) {}
+  constructor(
+    private modalCtrl: ModalController,
+    private toastCtrl: ToastController,
+    private data: DataService
+  ) {}
 
   dismiss() {
     this.modalCtrl.dismiss();
   }
 
-  save() {
-    if (!this.customer.name || !this.customer.phone) return;
-    const id = 'C' + Math.floor(Math.random() * 900 + 100);
-    this.data.addCustomer({ ...(this.customer as Customer), id });
-    this.modalCtrl.dismiss();
+  /** Digits only, at most 10. */
+  onPhoneInput() {
+    this.customer.phone = String(this.customer.phone ?? '').replace(/\D/g, '').slice(0, 10);
+    this.errors.phone = '';
+  }
+
+  private validate() {
+    const name = String(this.customer.name ?? '').trim();
+    const phone = String(this.customer.phone ?? '').replace(/\D/g, '');
+    const email = String(this.customer.email ?? '').trim();
+    this.errors = {};
+    if (!name) this.errors.name = 'Enter the customer’s name.';
+    if (!phone) this.errors.phone = 'Enter the phone number.';
+    else if (!/^[6-9]\d{9}$/.test(phone)) this.errors.phone = 'Enter a valid 10-digit mobile number (starts with 6–9).';
+    else {
+      const existing = this.data.findCustomerByPhone(phone);
+      if (existing) this.errors.phone = `This number already belongs to ${existing.name} (${existing.id}).`;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) this.errors.email = 'Enter a valid email, e.g. name@example.com.';
+    return Object.keys(this.errors).length === 0;
+  }
+
+  async save() {
+    if (this.saving || !this.validate()) return;
+    const customer: Customer = {
+      id: this.data.newCustomerId(),
+      name: String(this.customer.name).trim(),
+      phone: String(this.customer.phone).replace(/\D/g, ''),
+      email: String(this.customer.email ?? '').trim(),
+      loyaltyPoints: 0,
+      outstandingAmount: 0,
+      group: 'New',
+      totalOrders: 0,
+    };
+    this.saving = true;
+    const result = await this.data.saveCustomer(customer);
+    this.saving = false;
+    const toast = await this.toastCtrl.create({
+      message: result.ok ? `Added ${customer.name} (${customer.id}).` : `Customer not saved — ${result.reason}`,
+      duration: result.ok ? 2000 : 7000,
+      color: result.ok ? 'primary' : 'danger',
+    });
+    await toast.present();
+    if (result.ok) this.modalCtrl.dismiss();
   }
 }
 
@@ -81,7 +164,7 @@ export class CustomerFormModal {
         <ion-list lines="full">
           <ion-item *ngFor="let c of filtered">
             <ion-avatar slot="start" style="background:var(--ion-color-secondary); display:flex; align-items:center; justify-content:center; font-weight:700; color:var(--ion-color-secondary-contrast);">
-              {{ c.name.charAt(0) }}
+              {{ (c.name || '?').charAt(0) }}
             </ion-avatar>
             <ion-label>
               {{ c.name }}
@@ -118,7 +201,8 @@ export class CustomersPage {
     const q = this.query.toLowerCase().trim();
     if (!q) return this.customers;
     return this.customers.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.phone.includes(q)
+      // phone often comes back from the Sheet as a number, not text
+      (c) => String(c.name ?? '').toLowerCase().includes(q) || String(c.phone ?? '').includes(q)
     );
   }
 

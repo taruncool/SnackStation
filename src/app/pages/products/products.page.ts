@@ -135,8 +135,8 @@ export class ProductFormModal {
       <div class="ss-container">
         <ion-grid>
           <ion-row>
-            <ion-col size="12" size-md="6" size-lg="4" *ngFor="let p of filtered">
-              <ion-card class="ss-card" button (click)="openForm(p)">
+            <ion-col class="product-col" size="12" size-md="6" size-lg="4" *ngFor="let p of filtered">
+              <ion-card class="ss-card product-card" button (click)="openForm(p)">
                 <ion-card-content>
                   <div style="display:flex; gap:12px; align-items:start;">
                     <img
@@ -195,6 +195,15 @@ export class ProductFormModal {
       --background: var(--ion-color-primary);
       color: #fff;
       border-color: var(--ion-color-primary);
+    }
+    /* Tighter list: Ionic's default card margin + column padding left a big gap. */
+    .product-col {
+      padding-top: 0;
+      padding-bottom: 0;
+    }
+    .product-card {
+      margin-top: 5px;
+      margin-bottom: 5px;
     }
   `],
 })

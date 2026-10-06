@@ -238,9 +238,20 @@ export class PrinterService {
     }
   }
 
+  /**
+   * Prints the receipt through a hidden iframe rather than a new window:
+   * the bill auto-prints after Submit (not directly from a click), and
+   * browsers block pop-ups opened that way — an iframe isn't a pop-up.
+   */
   private printInBrowser(bill: Bill) {
-    const w = window.open('', '_blank', 'width=380,height=700');
-    if (!w) throw new Error('Pop-up blocked — allow pop-ups for this site to print.');
+    document.getElementById('ss-print-frame')?.remove();
+    const frame = document.createElement('iframe');
+    frame.id = 'ss-print-frame';
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed; right:0; bottom:0; width:0; height:0; border:0; visibility:hidden;';
+    document.body.appendChild(frame);
+    const w = frame.contentWindow;
+    if (!w) throw new Error("Couldn't prepare the receipt for printing.");
     const logoUrl = new URL(SHOP.logo, document.baseURI).href;
     const rows = bill.items
       .map(
@@ -281,12 +292,19 @@ export class PrinterService {
       ${SHOP.footer.slice(1).map((l) => `<div class="c">${escapeHtml(l)}</div>`).join('')}
     </body></html>`);
     w.document.close();
-    w.focus();
+    let printed = false;
+    const go = () => {
+      if (printed) return;
+      printed = true;
+      w.focus();
+      w.print();
+    };
+    // Wait for the logo so it isn't missing from the printout.
     const img = w.document.querySelector('img');
-    const go = () => w.print();
     if (img && !img.complete) {
       img.onload = go;
       img.onerror = go;
+      setTimeout(go, 1500);
     } else {
       setTimeout(go, 200);
     }

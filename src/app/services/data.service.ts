@@ -84,11 +84,12 @@ export interface BillItem {
   price: number; // selling price per unit at the time of the bill
 }
 
-/** One customer order from the Billing page (a row in the Bills tab). */
+/** One customer order from the Billing page (a row in the Billing tab). */
 export interface Bill {
   id: string; // bill number, e.g. SS260929-154233-07
   date: string; // YYYY-MM-DD, local
   createdAt: string; // ISO timestamp
+  customerId: string; // Customers tab id, blank for walk-ins
   customerName: string;
   customerPhone: string;
   items: BillItem[];
@@ -98,6 +99,7 @@ export interface Bill {
   discount: number; // rupees taken off the subtotal
   total: number;
   paymentMethod: string;
+  billedBy: string; // name of the logged-in user
 }
 
 export type BillResult =
@@ -383,11 +385,20 @@ export class DataService {
   getCustomers() {
     return this.customers$.asObservable();
   }
-  addCustomer(customer: Customer) {
-    this.postSheet('Customers', 'add', customer).subscribe({
-      next: () => this.refreshCustomers(),
-      error: (err) => console.error('Failed to add customer', err),
-    });
+  /** Adds a customer and reports whether it really saved (verified by id,
+   *  never written twice). The list updates straight away on success. */
+  async saveCustomer(customer: Customer): Promise<{ ok: boolean; reason?: string }> {
+    if (!(await this.postRowsConfirmed('Customers', [{ ...customer }]))) {
+      return { ok: false, reason: this.lastWriteError || "Couldn't save the customer." };
+    }
+    this.customers$.next([...this.customers$.value.filter((c) => c.id !== customer.id), customer]);
+    this.refreshCustomers();
+    return { ok: true };
+  }
+
+  /** Next id in the C001, C002… sequence. */
+  newCustomerId() {
+    return nextCustomerId(this.customers$.value);
   }
 
   // ---- Offers (read-only for now) ----
@@ -424,17 +435,29 @@ export class DataService {
   getExpensesSnapshot() {
     return this.expenses$.value;
   }
-  addExpense(expense: Expense) {
-    this.postSheet('Expenses', 'add', expense).subscribe({
-      next: () => this.refreshExpenses(),
-      error: (err) => console.error('Failed to add expense', err),
-    });
-  }
-  updateExpense(updated: Expense) {
-    this.postSheet('Expenses', 'update', updated).subscribe({
-      next: () => this.refreshExpenses(),
-      error: (err) => console.error('Failed to update expense', err),
-    });
+  /**
+   * Adds or updates an expense and reports whether it really saved, so the
+   * form can say so instead of failing silently. New expenses go through
+   * postRowsConfirmed (verified by id, never written twice). On success the
+   * list updates straight away, then re-syncs from the Sheet.
+   */
+  async saveExpense(expense: Expense, isNew: boolean): Promise<{ ok: boolean; reason?: string }> {
+    if (isNew) {
+      if (!(await this.postRowsConfirmed('Expenses', [{ ...expense }]))) {
+        return { ok: false, reason: this.lastWriteError || "Couldn't save the expense." };
+      }
+    } else {
+      try {
+        const res = await firstValueFrom(this.postSheet('Expenses', 'update', expense));
+        if (res?.error) return { ok: false, reason: `Google Sheets said: ${res.error}` };
+      } catch (err) {
+        console.error('Failed to update expense', err);
+        return { ok: false, reason: "Couldn't reach Google Sheets — check your connection." };
+      }
+    }
+    this.expenses$.next([...this.expenses$.value.filter((e) => e.id !== expense.id), expense]);
+    this.refreshExpenses();
+    return { ok: true };
   }
   deleteExpense(id: string) {
     this.postSheet('Expenses', 'delete', { id }).subscribe({
@@ -621,9 +644,12 @@ export class DataService {
         err
       );
       const page = String(err?.error?.text ?? '');
-      this.lastWriteError = page.includes('do not have permission')
-        ? "Google Sheets refused the write — the Apps Script's account doesn't have edit access to the spreadsheet (see SETUP.md)."
-        : `Request failed (status ${err?.status ?? '?'}): ${err?.message ?? err}`.slice(0, 160);
+      // In a browser, an Apps Script error page (e.g. "You do not have
+      // permission…") arrives as a CORS failure with status 0 and no body.
+      this.lastWriteError =
+        page.includes('do not have permission') || err?.status === 0
+          ? "Google Sheets refused the write — the Apps Script's account can't edit the spreadsheet. Check the deployment's \"Execute as\" account has Editor access."
+          : `Request failed (status ${err?.status ?? '?'}): ${err?.message ?? err}`.slice(0, 200);
     }
     const ids = rows.map((r) => r.id);
     // Apps Script Web Apps can take several seconds — occasionally 10-20s on
@@ -909,10 +935,10 @@ export class DataService {
    * Saves one customer bill. Its items go to SalesHistory first — the same
    * rows "Submit Today's Sales" writes, so they show up in Today's Sales
    * Count, Dashboard and Reports automatically — then the bill itself goes
-   * to the Bills tab (for reprints/history) and stock is deducted. A
+   * to the Billing tab (for reprints/history) and stock is deducted. A
    * discount is spread across the items' priceAtSale so revenue stays
    * accurate. Fails only if the sales rows couldn't be confirmed as saved;
-   * if just the Bills row fails, the sale still counts (billRecordSaved
+   * if just the Billing row fails, the sale still counts (billRecordSaved
    * false) and the receipt can still be printed.
    */
   async submitBill(input: {
@@ -922,6 +948,7 @@ export class DataService {
     discountPercent: number;
     discount: number;
     paymentMethod: string;
+    billedBy: string;
   }): Promise<BillResult> {
     const items: BillItem[] = input.items
       .filter((i) => i.qty > 0)
@@ -953,12 +980,14 @@ export class DataService {
     }
     this.salesWriteSeq++;
 
+    const customer = await this.linkCustomer(input.customerName, input.customerPhone);
     const bill: Bill = {
       id,
       date: today,
       createdAt: now.toISOString(),
-      customerName: (input.customerName || '').trim(),
-      customerPhone: (input.customerPhone || '').trim(),
+      customerId: customer.id,
+      customerName: customer.name,
+      customerPhone: customer.phone,
       items,
       itemCount: items.reduce((sum, i) => sum + i.qty, 0),
       subtotal,
@@ -966,9 +995,14 @@ export class DataService {
       discount,
       total,
       paymentMethod: input.paymentMethod,
+      billedBy: input.billedBy || '',
     };
-    const billRecordSaved = await this.postRowsConfirmed('Bills', [
-      { ...bill, items: JSON.stringify(bill.items) },
+    const billRecordSaved = await this.postRowsConfirmed('Billing', [
+      {
+        ...bill,
+        itemsSummary: items.map((i) => `${i.name} x${i.qty}`).join(', '),
+        items: JSON.stringify(bill.items),
+      },
     ]);
     if (!billRecordSaved) console.error('Sale recorded, but saving the bill record failed:', this.lastWriteError);
 
@@ -994,10 +1028,59 @@ export class DataService {
     return { status: 'saved', bill, billRecordSaved };
   }
 
-  // ---- Bills (per-order records from the Billing page) ----
+  /**
+   * Links a bill to the Customers tab by phone number (last 10 digits). A
+   * known number reuses that customer (and counts the order); a new number
+   * adds a customer. No phone = walk-in, no customer id. Never blocks the
+   * bill — if the Customers write fails, the bill just isn't linked.
+   */
+  private async linkCustomer(rawName: string, rawPhone: string) {
+    const name = (rawName || '').trim();
+    const phone = normalizePhone(rawPhone);
+    if (!phone) return { id: '', name, phone: (rawPhone || '').trim() };
+
+    const existing = this.findCustomerByPhone(phone);
+    try {
+      if (existing) {
+        await firstValueFrom(
+          this.postSheet('Customers', 'update', { ...existing, totalOrders: (Number(existing.totalOrders) || 0) + 1 })
+        );
+        this.refreshCustomers();
+        return { id: existing.id, name: name || existing.name, phone };
+      }
+      const customer: Customer = {
+        id: nextCustomerId(this.customers$.value),
+        name: name || 'Customer',
+        phone,
+        email: '',
+        loyaltyPoints: 0,
+        outstandingAmount: 0,
+        group: 'New',
+        totalOrders: 1,
+      };
+      const res = await firstValueFrom(this.postSheet('Customers', 'add', customer));
+      if (res?.error) throw new Error(res.error);
+      // Known straight away, so the next bill for this number links to it.
+      this.customers$.next([...this.customers$.value, customer]);
+      this.refreshCustomers();
+      return { id: customer.id, name: customer.name, phone };
+    } catch (err) {
+      console.error('Linking the bill to a customer failed', err);
+      return { id: existing?.id || '', name: name || existing?.name || '', phone };
+    }
+  }
+
+  /** The customer with this phone number (compared on the last 10 digits). */
+  findCustomerByPhone(rawPhone: string): Customer | undefined {
+    const phone = normalizePhone(rawPhone);
+    if (!phone) return undefined;
+    return this.customers$.value.find((c) => normalizePhone(String(c.phone)) === phone);
+  }
+
+  // ---- Billing tab (per-order records from the Billing page) ----
   refreshBills() {
     if (this.billsStatus$.value !== 'loaded') this.billsStatus$.next('loading');
-    this.getSheet<any>('Bills').subscribe({
+    this.getSheet<any>('Billing').subscribe({
       next: (rows) => {
         const bills = rows
           .filter((r) => r.id)
@@ -1012,6 +1095,7 @@ export class DataService {
               id: String(r.id),
               date: String(r.date || ''),
               createdAt: String(r.createdAt || ''),
+              customerId: String(r.customerId || ''),
               customerName: String(r.customerName || ''),
               customerPhone: String(r.customerPhone || ''),
               items: items.map((i) => ({ ...i, qty: Number(i.qty) || 0, price: Number(i.price) || 0 })),
@@ -1021,6 +1105,7 @@ export class DataService {
               discount: Number(r.discount) || 0,
               total: Number(r.total) || 0,
               paymentMethod: String(r.paymentMethod || ''),
+              billedBy: String(r.billedBy || ''),
             } as Bill;
           })
           .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
@@ -1028,7 +1113,7 @@ export class DataService {
         this.billsStatus$.next('loaded');
       },
       error: (err) => {
-        console.error('Failed to load Bills from Google Sheets', err);
+        console.error('Failed to load Billing from Google Sheets', err);
         if (this.billsStatus$.value !== 'loaded') this.billsStatus$.next('error');
       },
     });
@@ -1039,6 +1124,21 @@ export class DataService {
   getBillsStatus() {
     return this.billsStatus$.asObservable();
   }
+}
+
+/** Last 10 digits of an Indian mobile number, or '' if it isn't one. */
+function normalizePhone(raw: string) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : '';
+}
+
+/** Next id in the C001, C002… sequence used by the Customers tab. */
+function nextCustomerId(customers: Customer[]) {
+  const max = customers.reduce((m, c) => {
+    const n = Number(String(c.id).replace(/^C/i, ''));
+    return Number.isFinite(n) && n > m ? n : m;
+  }, 0);
+  return `C${String(max + 1).padStart(3, '0')}`;
 }
 
 /** Bill numbers readable on a receipt and unique across devices without a

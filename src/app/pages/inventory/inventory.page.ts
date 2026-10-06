@@ -2,9 +2,9 @@ import { Component } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { IonicModule, ModalController, AlertController } from '@ionic/angular';
+import { IonicModule, ModalController, AlertController, ToastController } from '@ionic/angular';
 import { DataStateComponent } from '../../shared/data-state.component';
-import { DataService, Expense } from '../../services/data.service';
+import { DataService, Expense, localDateKey } from '../../services/data.service';
 
 const EXPENSE_CATEGORIES: Expense['category'][] = [
   'Raw Material',
@@ -50,27 +50,38 @@ const CATEGORY_COLOR: Record<string, string> = {
       </ion-toolbar>
     </ion-header>
     <ion-content class="ion-padding">
-      <ion-item>
-        <ion-label position="stacked">What was it for?</ion-label>
+      <ion-item [class.invalid]="!!errors.name">
+        <ion-label position="stacked">What was it for? *</ion-label>
         <ion-input
           [(ngModel)]="expense.name"
+          (ionInput)="errors.name = ''"
           placeholder="e.g. Chicken (20kg), Gas stove, Staff wages"
         ></ion-input>
       </ion-item>
+      <p class="field-error" *ngIf="errors.name">{{ errors.name }}</p>
       <ion-item>
         <ion-label position="stacked">Category</ion-label>
         <ion-select [(ngModel)]="expense.category" (ionChange)="onCategoryChange()">
           <ion-select-option *ngFor="let c of categories" [value]="c">{{ c }}</ion-select-option>
         </ion-select>
       </ion-item>
-      <ion-item>
-        <ion-label position="stacked">Amount (₹)</ion-label>
-        <ion-input type="number" [(ngModel)]="expense.amount"></ion-input>
+      <ion-item [class.invalid]="!!errors.amount">
+        <ion-label position="stacked">Amount (₹) *</ion-label>
+        <ion-input
+          type="number"
+          inputmode="decimal"
+          min="0"
+          placeholder="0"
+          [(ngModel)]="expense.amount"
+          (ionInput)="errors.amount = ''"
+        ></ion-input>
       </ion-item>
-      <ion-item lines="none">
-        <ion-label position="stacked">Date</ion-label>
-        <ion-input type="date" [(ngModel)]="expense.date"></ion-input>
+      <p class="field-error" *ngIf="errors.amount">{{ errors.amount }}</p>
+      <ion-item lines="none" [class.invalid]="!!errors.date">
+        <ion-label position="stacked">Date *</ion-label>
+        <ion-input type="date" [(ngModel)]="expense.date" (ionChange)="errors.date = ''"></ion-input>
       </ion-item>
+      <p class="field-error" *ngIf="errors.date">{{ errors.date }}</p>
       <ion-item lines="none" *ngIf="expense.category === 'Kitchen Appliances'">
         <ion-label position="stacked">Spread cost over (months)</ion-label>
         <ion-input type="number" [(ngModel)]="expense.usefulLifeMonths"></ion-input>
@@ -85,22 +96,42 @@ const CATEGORY_COLOR: Record<string, string> = {
         <ion-textarea [(ngModel)]="expense.notes" rows="2"></ion-textarea>
       </ion-item>
 
-      <ion-button expand="block" color="primary" style="margin-top:20px;" (click)="save()">
-        Save Expense
+      <ion-button expand="block" color="primary" style="margin-top:20px;" [disabled]="saving" (click)="save()">
+        <ion-spinner *ngIf="saving" name="dots" style="margin-right:8px;"></ion-spinner>
+        {{ saving ? 'Saving…' : 'Save Expense' }}
       </ion-button>
     </ion-content>
   `,
+  styles: [
+    `
+      .field-error {
+        color: var(--ion-color-danger);
+        font-size: 12px;
+        margin: 4px 16px 8px;
+      }
+      ion-item.invalid {
+        --border-color: var(--ion-color-danger);
+        --highlight-color-focused: var(--ion-color-danger);
+      }
+    `,
+  ],
 })
 export class ExpenseFormModal {
   categories = EXPENSE_CATEGORIES;
   expense: Partial<Expense> = {
     category: 'Raw Material',
-    amount: 0,
-    date: new Date().toISOString().slice(0, 10),
+    amount: undefined,
+    date: localDateKey(),
     notes: '',
   };
+  errors: { name?: string; amount?: string; date?: string } = {};
+  saving = false;
 
-  constructor(private modalCtrl: ModalController, private data: DataService) {}
+  constructor(
+    private modalCtrl: ModalController,
+    private toastCtrl: ToastController,
+    private data: DataService
+  ) {}
 
   dismiss() {
     this.modalCtrl.dismiss();
@@ -112,21 +143,45 @@ export class ExpenseFormModal {
     }
   }
 
-  save() {
-    if (!this.expense.name || !this.expense.amount || !this.expense.date) return;
-    const payload: Partial<Expense> = { ...this.expense };
+  /** Says what's missing instead of silently ignoring the tap. */
+  private validate() {
+    const amount = Number(this.expense.amount);
+    this.errors = {};
+    if (!String(this.expense.name ?? '').trim()) this.errors.name = 'Enter what this expense was for.';
+    if (!Number.isFinite(amount) || amount <= 0) this.errors.amount = 'Enter an amount above 0.';
+    if (!this.expense.date) this.errors.date = 'Pick a date.';
+    return Object.keys(this.errors).length === 0;
+  }
+
+  async save() {
+    if (this.saving || !this.validate()) return;
+    const isNew = !this.expense.id;
+    const payload = {
+      ...this.expense,
+      id: this.expense.id || 'E' + Date.now(),
+      name: String(this.expense.name).trim(),
+      amount: Number(this.expense.amount),
+      notes: String(this.expense.notes ?? '').trim(),
+    } as Expense;
     if (payload.category === 'Kitchen Appliances') {
-      payload.usefulLifeMonths = payload.usefulLifeMonths && payload.usefulLifeMonths > 0 ? payload.usefulLifeMonths : 36;
+      const months = Number(payload.usefulLifeMonths);
+      payload.usefulLifeMonths = months > 0 ? months : 36;
     } else {
       payload.usefulLifeMonths = 1;
     }
-    if (payload.id) {
-      this.data.updateExpense(payload as Expense);
-    } else {
-      const id = 'E' + Date.now();
-      this.data.addExpense({ ...(payload as Expense), id });
-    }
-    this.modalCtrl.dismiss();
+
+    this.saving = true;
+    const result = await this.data.saveExpense(payload, isNew);
+    this.saving = false;
+    const toast = await this.toastCtrl.create({
+      message: result.ok
+        ? `${isNew ? 'Added' : 'Updated'} "${payload.name}" — ₹${payload.amount.toLocaleString()}.`
+        : `Expense not saved — ${result.reason}`,
+      duration: result.ok ? 2000 : 6000,
+      color: result.ok ? 'primary' : 'danger',
+    });
+    await toast.present();
+    if (result.ok) this.modalCtrl.dismiss();
   }
 }
 
@@ -188,7 +243,7 @@ export class ExpenseFormModal {
             <ion-card-title style="font-size:16px;">By Category</ion-card-title>
           </ion-card-header>
           <ion-card-content>
-            <div *ngFor="let c of categoryBreakdown" style="margin-bottom:12px;">
+            <div *ngFor="let c of categoryBreakdown; trackBy: trackByCategory" style="margin-bottom:12px;">
               <div style="display:flex; justify-content:space-between; align-items:center; font-size:13px; margin-bottom:4px;">
                 <span style="display:flex; align-items:center; gap:6px;">
                   <ion-icon [name]="icon(c.category)" [color]="color(c.category)"></ion-icon>
@@ -220,7 +275,7 @@ export class ExpenseFormModal {
             <ion-card-title style="font-size:16px;">All Entries</ion-card-title>
           </ion-card-header>
           <ion-list lines="full" *ngIf="filtered.length > 0">
-            <ion-item *ngFor="let e of filtered">
+            <ion-item *ngFor="let e of filtered; trackBy: trackById">
               <ion-icon slot="start" [name]="icon(e.category)" [color]="color(e.category)"></ion-icon>
               <ion-label>
                 <h3 style="font-weight:600;">{{ e.name }}</h3>
@@ -310,14 +365,21 @@ export class InventoryPage {
   categoryOptions: string[] = ['All', ...EXPENSE_CATEGORIES];
   selectedCategory = 'All';
 
+  // Worked out once per data change (see setExpenses), NOT in getters: a
+  // getter returning fresh objects made *ngFor rebuild the rows — and their
+  // <ion-icon>s — on every change-detection pass; each new ion-icon kicks
+  // off async icon loading, which triggers another pass, forever. That
+  // froze the whole app with no error as soon as expenses loaded.
+  totalAll = 0;
+  totalThisMonth = 0;
+  categoryBreakdown: { category: string; amount: number }[] = [];
+
   constructor(
     public data: DataService,
     private modalCtrl: ModalController,
     private alertCtrl: AlertController
   ) {
-    this.data.getExpenses().subscribe((e) => {
-      this.expenses = [...e].sort((a, b) => (a.date < b.date ? 1 : -1));
-    });
+    this.data.getExpenses().subscribe((e) => this.setExpenses(e));
     this.data.getExpensesStatus().subscribe((st) => (this.status = st));
   }
 
@@ -325,26 +387,32 @@ export class InventoryPage {
     const q = this.query.toLowerCase().trim();
     return this.expenses.filter((e) => {
       const matchesCategory = this.selectedCategory === 'All' || e.category === this.selectedCategory;
-      const matchesQuery = !q || e.name.toLowerCase().includes(q) || e.notes?.toLowerCase().includes(q);
+      const matchesQuery =
+        !q || String(e.name ?? '').toLowerCase().includes(q) || String(e.notes ?? '').toLowerCase().includes(q);
       return matchesCategory && matchesQuery;
     });
   }
 
-  get totalAll() {
-    return this.expenses.reduce((s, e) => s + e.amount, 0);
-  }
-
-  get totalThisMonth() {
-    const prefix = new Date().toISOString().slice(0, 7);
-    return this.expenses.filter((e) => e.date.startsWith(prefix)).reduce((s, e) => s + e.amount, 0);
-  }
-
-  get categoryBreakdown() {
+  private setExpenses(list: Expense[]) {
+    this.expenses = [...list].sort((a, b) => (a.date < b.date ? 1 : -1));
+    this.totalAll = this.expenses.reduce((s, e) => s + (Number(e.amount) || 0), 0);
+    const prefix = localDateKey().slice(0, 7);
+    this.totalThisMonth = this.expenses
+      .filter((e) => String(e.date).startsWith(prefix))
+      .reduce((s, e) => s + (Number(e.amount) || 0), 0);
     const totals: Record<string, number> = {};
-    for (const e of this.expenses) totals[e.category] = (totals[e.category] || 0) + e.amount;
-    return Object.entries(totals)
+    for (const e of this.expenses) totals[e.category] = (totals[e.category] || 0) + (Number(e.amount) || 0);
+    this.categoryBreakdown = Object.entries(totals)
       .map(([category, amount]) => ({ category, amount }))
       .sort((a, b) => b.amount - a.amount);
+  }
+
+  trackByCategory(_: number, c: { category: string }) {
+    return c.category;
+  }
+
+  trackById(_: number, e: Expense) {
+    return e.id;
   }
 
   icon(category: string) {
