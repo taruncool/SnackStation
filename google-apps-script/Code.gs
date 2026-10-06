@@ -153,28 +153,6 @@ function doPost(e) {
   return jsonResponse({ error: 'Unknown action: ' + action });
 }
 
-/** Who the web app runs as, and whether that account can edit the Sheet.
- *  Also runnable from the editor (Run > accessReport) — it changes nothing. */
-function accessReport() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var runsAs = '';
-  try { runsAs = Session.getEffectiveUser().getEmail(); } catch (err) { runsAs = '(unknown)'; }
-  var owner = '';
-  try { owner = ss.getOwner() ? ss.getOwner().getEmail() : ''; } catch (err) { owner = '(unknown)'; }
-  var editors = [];
-  try { editors = ss.getEditors().map(function (u) { return u.getEmail(); }); } catch (err) { editors = []; }
-  var report = {
-    runsAs: runsAs,
-    owner: owner,
-    canEdit: runsAs !== '' && (runsAs === owner || editors.indexOf(runsAs) !== -1),
-    protectedTabs: ss.getProtections(SpreadsheetApp.ProtectionType.SHEET).map(function (p) {
-      return p.getRange().getSheet().getName();
-    }),
-  };
-  Logger.log(JSON.stringify(report));
-  return report;
-}
-
 /** Checks a PIN against the Users tab (created with DEMO_USERS the first
  *  time). Returns the matching active user without the PIN. */
 function login(data) {
